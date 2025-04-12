@@ -1,0 +1,14 @@
+$:
+  vscode:
+    - docker:
+        build: 
+          dockerfile: .cnb/Dockerfile
+      runner:
+        cpus: 8
+        tags: cnb:arch:amd64:gpu
+      services:
+        - vscode
+        - docker
+      stages:
+        - name: ll
+          script: ls -la

@@ -48,7 +48,7 @@ RUN /bin/bash -c "source /opt/mineru_venv/bin/activate && \
     pip3 install --upgrade pip && \
     wget https://gcore.jsdelivr.net/gh/opendatalab/MinerU@master/docker/china/requirements.txt -O requirements.txt && \
     pip3 install -r requirements.txt && \
-    pip3 install -r shapely pyclipper omegaconf"
+    pip3 install shapely pyclipper omegaconf"
 
 # Copy the configuration file template and install magic-pdf latest
 RUN /bin/bash -c "wget https://gcore.jsdelivr.net/gh/opendatalab/MinerU@master/magic-pdf.template.json && \

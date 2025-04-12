@@ -3,6 +3,8 @@ FROM ubuntu:22.04
 
 # Set environment variables to non-interactive to avoid prompts during installation
 ENV DEBIAN_FRONTEND=noninteractive
+ENV LANG C.UTF-8
+ENV LANGUAGE C.UTF-8
 
 # Update the package list and install necessary packages
 RUN apt-get update && \

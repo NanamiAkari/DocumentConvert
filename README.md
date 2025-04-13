@@ -21,9 +21,10 @@ $:
         - vscode
         - docker
 ```
-进入云原生开发的 VSCode，在 Terminal 中启动环境:
-```bash
-source /opt/mineru_venv/bin/activate
+进入云原生开发的 VSCode，在 Terminal 中使用 MinerU 相关命令执行转换即可。
+```
+## command line example
+magic-pdf -p {some_pdf} -o {some_output_dir} -m auto
 ```
 
 ## 帮助

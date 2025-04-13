@@ -22,6 +22,8 @@ RUN apt-get update && \
         unzip \
         lsof \
         curl \
+        vim \
+        nano \
         openssh-server \
         libgl1 \
         libglib2.0-0 \

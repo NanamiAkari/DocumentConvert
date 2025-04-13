@@ -27,6 +27,7 @@ RUN apt-get update && \
         openssh-server \
         libgl1 \
         libglib2.0-0 \
+        libreoffice \
         && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL https://code-server.dev/install.sh | sh -s -- --version 4.96.2 &&\

@@ -6,7 +6,13 @@ MinerU 是一款将 PDF 转化为机器可读格式的工具（如markdown、jso
 使用 CNB.COOL 的 GPU 进行 PDF, PPT, PPTX, DOC, DOCX, PNG, JPG 到 Markdown, Json转换。
 
 ## 开始使用
-使用镜像：
+
+### A.快速开始（推荐）
+
+访问 https://cnb.cool/hex/MinerU-Runtime 项目，Fork项目，即可开始使用。
+
+### B.使用镜像（高级用户）
+
 ```bash
 docker pull docker.cnb.cool/hex/mineru:latest
 ```

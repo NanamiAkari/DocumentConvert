@@ -30,6 +30,13 @@ RUN apt-get update && \
         libxrender1 \
         libsm6 \
         libxext6 \
+        unzip \
+        lsof \
+        curl \
+        vim \
+        nano \
+        openssh-server \
+        libglib2.0-0 \
         poppler-utils \
         && rm -rf /var/lib/apt/lists/*
 

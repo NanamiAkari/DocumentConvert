@@ -1,8 +1,7 @@
 $:
   vscode:
     - docker:
-        build: 
-          dockerfile: docker.cnb.cool/hex/mineru:latest
+        image:  docker.cnb.cool/hex/mineru:latest
       runner:
         cpus: 16
         tags: cnb:arch:amd64:gpu:L20

@@ -2,10 +2,10 @@ $:
   vscode:
     - docker:
         build: 
-          dockerfile: .cnb/Dockerfile
+          dockerfile: docker.cnb.cool/hex/mineru:latest
       runner:
-        cpus: 8
-        tags: cnb:arch:amd64:gpu
+        cpus: 16
+        tags: cnb:arch:amd64:gpu:L20
       services:
         - vscode
         - docker

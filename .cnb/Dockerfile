@@ -1,10 +1,11 @@
-# Use the official Ubuntu base image
+# MinerU CPU Mode Dockerfile
 FROM ubuntu:22.04
 
 # Set environment variables to non-interactive to avoid prompts during installation
 ENV DEBIAN_FRONTEND=noninteractive
-ENV LANG C.UTF-8
-ENV LANGUAGE C.UTF-8
+ENV LANG=C.UTF-8
+ENV LANGUAGE=C.UTF-8
+ENV PYTHONUNBUFFERED=1
 
 # Update the package list and install necessary packages
 RUN apt-get update && \
@@ -15,41 +16,29 @@ RUN apt-get update && \
     apt-get install -y \
         python3.10 \
         python3.10-venv \
-        python3.10-distutils \
+        python3.10-dev \
         python3-pip \
         wget \
         git \
-        libgl1 \
+        curl \
+        vim \
+        unzip \
+        libgl1-mesa-glx \
+        libglib2.0-0 \
+        libxrender1 \
+        libxext6 \
+        libsm6 \
+        libxrandr2 \
+        libfontconfig1 \
+        libxss1 \
         libreoffice \
         fonts-noto-cjk \
         fonts-wqy-zenhei \
         fonts-wqy-microhei \
         ttf-mscorefonts-installer \
         fontconfig \
-        libglib2.0-0 \
-        libxrender1 \
-        libsm6 \
-        libxext6 \
-        unzip \
-        lsof \
-        curl \
-        vim \
-        nano \
-        openssh-server \
-        libglib2.0-0 \
         poppler-utils \
         && rm -rf /var/lib/apt/lists/*
-
-# VSC
-RUN curl -fsSL https://code-server.dev/install.sh | sh -s -- --version 4.96.2 &&\
-        code-server --install-extension redhat.vscode-yaml &&\
-        code-server --install-extension tencent-cloud.coding-copilot &&\
-        code-server --install-extension waderyan.gitblame &&\
-        code-server --install-extension mhutchie.git-graph &&\
-        code-server --install-extension donjayamanne.githistory &&\
-        code-server --install-extension cloudstudio.live-server &&\
-        code-server --install-extension cnbcool.cnb-welcome
-    
 
 # Set Python 3.10 as the default python3
 RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1
@@ -57,20 +46,34 @@ RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1
 # Create a virtual environment for MinerU
 RUN python3 -m venv /opt/mineru_venv
 
-# Copy the configuration file template and install magic-pdf latest
-RUN /bin/bash -c "wget https://gcore.jsdelivr.net/gh/opendatalab/MinerU@master/magic-pdf.template.json && \
-    cp magic-pdf.template.json /root/magic-pdf.json && \
-    source /opt/mineru_venv/bin/activate && \
-    pip3 install --upgrade pip -i https://mirrors.cloud.tencent.com/pypi/simple && \
-    pip3 install -U magic-pdf[full] -i https://mirrors.cloud.tencent.com/pypi/simple"
+# Activate virtual environment and install MinerU
+RUN /bin/bash -c "source /opt/mineru_venv/bin/activate && \
+    pip3 install --upgrade pip -i https://mirrors.aliyun.com/pypi/simple/ && \
+    pip3 install uv -i https://mirrors.aliyun.com/pypi/simple/ && \
+    uv pip install 'mineru[core]' -i https://mirrors.aliyun.com/pypi/simple/"
 
-# Download models and update the configuration file
-RUN /bin/bash -c "pip3 install modelscope -i https://mirrors.cloud.tencent.com/pypi/simple && \
-    wget https://gcore.jsdelivr.net/gh/opendatalab/MinerU@master/scripts/download_models.py -O download_models.py && \
-    python3 download_models.py && \
-    sed -i 's|cpu|cuda|g' /root/magic-pdf.json"
+# Download configuration template and models
+RUN /bin/bash -c "source /opt/mineru_venv/bin/activate && \
+    wget https://raw.githubusercontent.com/opendatalab/MinerU/master/mineru.template.json -O /root/mineru.json && \
+    pip3 install modelscope -i https://mirrors.aliyun.com/pypi/simple/ && \
+    wget https://raw.githubusercontent.com/opendatalab/MinerU/master/scripts/download_models.py -O /tmp/download_models.py && \
+    python3 /tmp/download_models.py"
 
-RUN echo 'source /opt/mineru_venv/bin/activate' >> /root/.bashrc
+# Configure for CPU mode
+RUN /bin/bash -c "source /opt/mineru_venv/bin/activate && \
+    sed -i 's/\"device_mode\": \"cuda\"/\"device_mode\": \"cpu\"/g' /root/mineru.json"
 
-# Set the entry point to activate the virtual environment and run the command line tool
+# Create working directory
+WORKDIR /app
+
+# Add virtual environment to PATH
+ENV PATH="/opt/mineru_venv/bin:$PATH"
+
+# Expose port for API
+EXPOSE 8000
+
+# Set the entry point to activate the virtual environment
 ENTRYPOINT ["/bin/bash", "-c", "source /opt/mineru_venv/bin/activate && exec \"$@\"", "--"]
+
+# Default command
+CMD ["bash"]

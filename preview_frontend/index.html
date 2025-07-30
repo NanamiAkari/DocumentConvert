@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LibreOffice 文档在线预览系统</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .header p {
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+        
+        .main-content {
+            display: flex;
+            min-height: 600px;
+        }
+        
+        .sidebar {
+            width: 350px;
+            background: #f8f9fa;
+            border-right: 1px solid #e9ecef;
+            padding: 20px;
+        }
+        
+        .sidebar h3 {
+            color: #495057;
+            margin-bottom: 20px;
+            font-size: 1.3em;
+            border-bottom: 2px solid #007bff;
+            padding-bottom: 10px;
+        }
+        
+        .file-list {
+            list-style: none;
+        }
+        
+        .file-item {
+            background: white;
+            margin-bottom: 10px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            transition: all 0.3s ease;
+            cursor: pointer;
+            overflow: hidden;
+        }
+        
+        .file-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+        }
+        
+        .file-item.active {
+            border-left: 4px solid #007bff;
+            background: #e3f2fd;
+        }
+        
+        .file-info {
+            padding: 15px;
+        }
+        
+        .file-name {
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 5px;
+            word-break: break-word;
+        }
+        
+        .file-type {
+            font-size: 0.9em;
+            color: #6c757d;
+            background: #e9ecef;
+            padding: 2px 8px;
+            border-radius: 12px;
+            display: inline-block;
+        }
+        
+        .preview-area {
+            flex: 1;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .preview-header {
+            margin-bottom: 20px;
+        }
+        
+        .preview-title {
+            font-size: 1.5em;
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+        
+        .preview-controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-block;
+        }
+        
+        .btn-primary {
+            background: #007bff;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #0056b3;
+        }
+        
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+        
+        .btn-secondary:hover {
+            background: #545b62;
+        }
+        
+        .preview-frame {
+            flex: 1;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            background: #f8f9fa;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 500px;
+        }
+        
+        .preview-frame iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+            border-radius: 8px;
+        }
+        
+        .no-preview {
+            text-align: center;
+            color: #6c757d;
+            font-size: 1.2em;
+        }
+        
+        .loading {
+            text-align: center;
+            color: #007bff;
+            font-size: 1.2em;
+        }
+        
+        .status-bar {
+            background: #f8f9fa;
+            padding: 15px 20px;
+            border-top: 1px solid #e9ecef;
+            color: #6c757d;
+            font-size: 0.9em;
+        }
+        
+        @media (max-width: 768px) {
+            .main-content {
+                flex-direction: column;
+            }
+            
+            .sidebar {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📄 LibreOffice 文档预览系统</h1>
+            <p>支持 DOC, DOCX, PPT, PPTX, XLS, XLSX 等格式的在线预览</p>
+        </div>
+        
+        <div class="main-content">
+            <div class="sidebar">
+                <h3>📁 文件列表</h3>
+                <ul class="file-list" id="fileList">
+                    <!-- 文件列表将通过JavaScript动态生成 -->
+                </ul>
+            </div>
+            
+            <div class="preview-area">
+                <div class="preview-header">
+                    <div class="preview-title" id="previewTitle">选择文件进行预览</div>
+                    <div class="preview-controls" id="previewControls" style="display: none;">
+                        <a href="#" class="btn btn-primary" id="downloadBtn" target="_blank">📥 下载PDF</a>
+                        <button class="btn btn-secondary" onclick="openInNewTab()">🔗 新窗口打开</button>
+                    </div>
+                </div>
+                
+                <div class="preview-frame" id="previewFrame">
+                    <div class="no-preview">
+                        <p>👆 请从左侧选择要预览的文件</p>
+                        <p style="margin-top: 10px; font-size: 0.9em;">支持的格式：PDF, DOC, DOCX, PPT, PPTX, XLS, XLSX</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="status-bar">
+            <span id="statusText">就绪 - 等待选择文件</span>
+        </div>
+    </div>
+    
+    <script>
+        // 模拟文件数据 - 实际应用中应该从服务器获取
+        const files = [
+            {
+                name: "2024年浙江省中考数学试卷.pdf",
+                type: "PDF",
+                path: "/workspace/test/pdf_output/2024年浙江省中考数学试卷.pdf",
+                originalType: "DOC"
+            },
+            {
+                name: "2025年杭州中考科学试卷及答案.pdf",
+                type: "PDF",
+                path: "/workspace/test/pdf_output/2025年杭州中考科学试卷及答案.pdf",
+                originalType: "DOC"
+            },
+            {
+                name: "2025年浙江省杭州市中考语文试卷.pdf",
+                type: "PDF",
+                path: "/workspace/test/pdf_output/2025年浙江省杭州市中考语文试卷.pdf",
+                originalType: "DOC"
+            },
+            {
+                name: "AI通识课程建设方案.pdf",
+                type: "PDF",
+                path: "/workspace/test/pdf_output/AI通识课程建设方案.pdf",
+                originalType: "PPTX"
+            },
+            {
+                name: "人工智能竞赛训练平台 v20250629.pdf",
+                type: "PDF",
+                path: "/workspace/test/pdf_output/人工智能竞赛训练平台 v20250629.pdf",
+                originalType: "XLSX"
+            },
+            {
+                name: "智涌君.pdf",
+                type: "PDF",
+                path: "/workspace/test/pdf_output/智涌君.pdf",
+                originalType: "DOCX"
+            }
+        ];
+        
+        let currentFile = null;
+        
+        // 初始化文件列表
+        function initFileList() {
+            const fileList = document.getElementById('fileList');
+            
+            files.forEach((file, index) => {
+                const li = document.createElement('li');
+                li.className = 'file-item';
+                li.onclick = () => selectFile(file, li);
+                
+                li.innerHTML = `
+                    <div class="file-info">
+                        <div class="file-name">${file.name}</div>
+                        <span class="file-type">${file.originalType} → PDF</span>
+                    </div>
+                `;
+                
+                fileList.appendChild(li);
+            });
+            
+            updateStatus(`找到 ${files.length} 个转换后的PDF文件`);
+        }
+        
+        // 选择文件
+        function selectFile(file, element) {
+            // 移除之前的选中状态
+            document.querySelectorAll('.file-item').forEach(item => {
+                item.classList.remove('active');
+            });
+            
+            // 添加选中状态
+            element.classList.add('active');
+            
+            currentFile = file;
+            
+            // 更新预览标题
+            document.getElementById('previewTitle').textContent = file.name;
+            
+            // 显示控制按钮
+            document.getElementById('previewControls').style.display = 'flex';
+            
+            // 更新下载链接
+            document.getElementById('downloadBtn').href = file.path;
+            
+            // 加载预览
+            loadPreview(file);
+            
+            updateStatus(`正在预览: ${file.name}`);
+        }
+        
+        // 加载预览
+        function loadPreview(file) {
+            const previewFrame = document.getElementById('previewFrame');
+            
+            // 显示加载状态
+            previewFrame.innerHTML = '<div class="loading">📄 正在加载预览...</div>';
+            
+            // 创建iframe预览PDF
+            setTimeout(() => {
+                const iframe = document.createElement('iframe');
+                iframe.src = file.path;
+                iframe.style.width = '100%';
+                iframe.style.height = '100%';
+                iframe.style.border = 'none';
+                iframe.style.borderRadius = '8px';
+                
+                iframe.onload = () => {
+                    updateStatus(`预览加载完成: ${file.name}`);
+                };
+                
+                iframe.onerror = () => {
+                    previewFrame.innerHTML = `
+                        <div class="no-preview">
+                            <p>❌ 预览加载失败</p>
+                            <p style="margin-top: 10px;">请尝试直接下载文件查看</p>
+                        </div>
+                    `;
+                    updateStatus(`预览加载失败: ${file.name}`);
+                };
+                
+                previewFrame.innerHTML = '';
+                previewFrame.appendChild(iframe);
+            }, 500);
+        }
+        
+        // 在新窗口打开
+        function openInNewTab() {
+            if (currentFile) {
+                window.open(currentFile.path, '_blank');
+            }
+        }
+        
+        // 更新状态栏
+        function updateStatus(message) {
+            document.getElementById('statusText').textContent = message;
+        }
+        
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            initFileList();
+        });
+    </script>
+</body>
+</html>

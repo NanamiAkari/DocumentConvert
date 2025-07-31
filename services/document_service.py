@@ -14,6 +14,15 @@ import time
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 import logging
+# MinerU Python API
+from pathlib import Path as PathlibPath
+from mineru.cli.common import read_fn
+from mineru.backend.pipeline.pipeline_analyze import doc_analyze as pipeline_doc_analyze
+from mineru.backend.pipeline.pipeline_middle_json_mkcontent import union_make as pipeline_union_make
+from mineru.backend.pipeline.model_json_to_middle_json import result_to_middle_json as pipeline_result_to_middle_json
+from mineru.data.data_reader_writer import FileBasedDataWriter
+from mineru.cli.common import prepare_env
+from mineru.utils.enum_class import MakeMode
 
 
 class DocumentService:
@@ -188,65 +197,179 @@ class DocumentService:
                 'skipped': True
             }
         
-        # 使用MinerU Python API进行PDF转Markdown
+        # 使用MinerU 2.0 Python API进行PDF转Markdown
         temp_output_dir = output_file.parent / "temp_mineru_output"
         temp_output_dir.mkdir(parents=True, exist_ok=True)
 
         try:
-            # 使用简化的方法：直接创建一个基本的markdown文件，表示转换成功
-            # 这是一个临时解决方案，用于测试系统的其他部分
-            self.logger.info(f"Creating basic markdown file for: {input_file}")
+            self.logger.info(f"Using MinerU 2.0 Python API to convert PDF: {input_file}")
 
-            # 创建基本的markdown内容
-            md_content = f"""# PDF转换结果
+            # 清理GPU内存
+            self._clear_gpu_memory()
+
+            # 读取PDF文件
+            pdf_bytes = read_fn(str(input_file))
+            pdf_file_name = input_file.stem
+
+            self.logger.info(f"PDF file loaded: {pdf_file_name}, size: {len(pdf_bytes)} bytes")
+
+            # 使用pipeline模式进行分析
+            self.logger.info("Starting MinerU pipeline analysis...")
+            infer_results, all_image_lists, all_pdf_docs, lang_list, ocr_enabled_list = pipeline_doc_analyze(
+                [pdf_bytes],
+                ["ch"],  # 中文语言
+                parse_method="auto",
+                formula_enable=True,
+                table_enable=True
+            )
+
+            self.logger.info(f"MinerU analysis completed, processing results...")
+
+            # 处理结果
+            if infer_results and len(infer_results) > 0:
+                model_list = infer_results[0]
+                images_list = all_image_lists[0] if all_image_lists and len(all_image_lists) > 0 else []
+                pdf_doc = all_pdf_docs[0] if all_pdf_docs and len(all_pdf_docs) > 0 else None
+                _lang = lang_list[0] if lang_list and len(lang_list) > 0 else "ch"
+                _ocr_enable = ocr_enabled_list[0] if ocr_enabled_list and len(ocr_enabled_list) > 0 else True
+
+                # 准备输出环境
+                local_image_dir, local_md_dir = prepare_env(str(temp_output_dir), pdf_file_name, "auto")
+                image_writer = FileBasedDataWriter(local_image_dir)
+
+                # 转换为中间JSON格式
+                middle_json = pipeline_result_to_middle_json(
+                    model_list, images_list, pdf_doc, image_writer, _lang, _ocr_enable, True
+                )
+
+                # 检查middle_json是否有效
+                if middle_json and "pdf_info" in middle_json:
+                    # 生成Markdown内容
+                    pdf_info = middle_json["pdf_info"]
+                    image_dir = str(os.path.basename(local_image_dir))
+                    md_content_str = pipeline_union_make(pdf_info, MakeMode.MM_MD, image_dir)
+
+                    # 写入输出文件
+                    with open(output_file, 'w', encoding='utf-8') as f:
+                        f.write(md_content_str)
+
+                    self.logger.info(f"MinerU conversion completed successfully: {output_file}")
+
+                    # 返回成功结果
+                    return {
+                        'success': True,
+                        'input_path': input_path,
+                        'output_path': str(output_file),
+                        'markdown_files': [str(output_file)],
+                        'file_count': 1,
+                        'conversion_type': 'pdf_to_markdown'
+                    }
+                else:
+                    raise RuntimeError("MinerU middle_json generation failed")
+            else:
+                raise RuntimeError("MinerU analysis returned no results")
+
+
+        except Exception as e:
+            self.logger.error(f"MinerU Python API conversion failed: {e}")
+            import traceback
+            self.logger.error(f"Traceback: {traceback.format_exc()}")
+
+            # 分析错误类型
+            error_str = str(e)
+            error_analysis = self._analyze_mineru_python_error(error_str, traceback.format_exc())
+
+            # 创建详细错误信息的markdown文件
+            md_content = f"""# PDF转换错误 (MinerU 2.0 Python API)
 
 文件: {input_file.name}
 转换时间: {time.strftime('%Y-%m-%d %H:%M:%S')}
 
-## 说明
+## 错误分析
 
-此文件是通过文档转换系统生成的Markdown文件。
-原始PDF文件已成功处理。
+{error_analysis}
 
-## 文件信息
+## 详细错误信息
 
-- 输入文件: {input_file}
-- 输出文件: {output_file}
-- 文件大小: {input_file.stat().st_size} 字节
+```
+{error_str}
+```
 
-## 注意
+## 完整堆栈跟踪
 
-这是一个基本的转换结果。如需更详细的内容提取，
-请使用专门的PDF解析工具。
+```
+{traceback.format_exc()}
+```
+
+## 建议解决方案
+
+1. 检查GPU内存是否足够
+2. 检查CUDA和PyTorch是否正确安装
+3. 检查PDF文件是否损坏或格式不支持
+4. 尝试重启Python进程释放资源
 """
 
-            # 写入markdown文件
             with open(output_file, 'w', encoding='utf-8') as f:
                 f.write(md_content)
 
-            self.logger.info(f"Basic markdown file created: {output_file}")
-
-        except Exception as e:
-            self.logger.error(f"PDF to Markdown conversion failed: {e}")
-            # 创建一个错误信息的markdown文件
-            with open(output_file, 'w', encoding='utf-8') as f:
-                f.write(f"# PDF转换错误\n\n转换过程中发生错误：{str(e)}\n")
-            raise RuntimeError(f"PDF conversion failed: {e}")
+            # 返回错误结果而不是抛出异常
+            return {
+                'success': False,
+                'error': f"MinerU Python API conversion failed: {error_analysis}",
+                'input_path': input_path,
+                'output_path': str(output_file),
+                'conversion_type': 'pdf_to_markdown'
+            }
 
         finally:
+            # 清理GPU内存
+            self._clear_gpu_memory()
+
             # 清理临时目录
             if temp_output_dir.exists():
                 shutil.rmtree(str(temp_output_dir))
                 self.logger.info(f"Cleaned up temporary directory: {temp_output_dir}")
-        
-        return {
-            'success': True,
-            'input_path': input_path,
-            'output_path': str(output_file),
-            'markdown_files': [str(output_file)],
-            'file_count': 1,
-            'conversion_type': 'pdf_to_markdown'
-        }
+
+    def _analyze_mineru_python_error(self, error_str: str, traceback_str: str) -> str:
+        """分析MinerU Python API错误信息"""
+        full_error = error_str + " " + traceback_str
+
+        if "CUDA out of memory" in full_error or "OutOfMemoryError" in full_error:
+            return "GPU内存不足错误 - 需要释放GPU内存或使用更小的batch size"
+        elif "No module named" in full_error:
+            return "Python模块缺失错误 - 检查MinerU及其依赖是否正确安装"
+        elif "CUDA" in full_error and ("not available" in full_error or "unavailable" in full_error):
+            return "CUDA不可用错误 - 检查CUDA驱动、PyTorch和GPU设置"
+        elif "Permission denied" in full_error or "PermissionError" in full_error:
+            return "权限错误 - 检查文件和目录的读写权限"
+        elif "FileNotFoundError" in full_error or "No such file" in full_error:
+            return "文件未找到错误 - 检查输入文件路径是否正确"
+        elif "ImportError" in full_error:
+            return "导入错误 - 检查MinerU依赖包是否完整安装"
+        elif "RuntimeError" in full_error and "model" in full_error.lower():
+            return "模型加载错误 - 检查模型文件是否完整下载"
+        elif "ValueError" in full_error:
+            return "参数值错误 - 检查输入参数是否正确"
+        elif "TypeError" in full_error:
+            return "类型错误 - 可能是API调用参数类型不匹配"
+        elif "AttributeError" in full_error:
+            return "属性错误 - 可能是MinerU版本不兼容"
+        elif error_str.strip():
+            return f"未知错误 - {error_str[:200]}..."
+        else:
+            return "无具体错误信息，可能是静默失败"
+
+    def _clear_gpu_memory(self):
+        """清理GPU内存"""
+        try:
+            import torch
+            import gc
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                gc.collect()
+                self.logger.info("GPU memory cleared")
+        except Exception as e:
+            self.logger.warning(f"Failed to clear GPU memory: {e}")
     
     async def _batch_convert_office_to_pdf(self, 
                                          input_path: str, 
@@ -399,16 +522,17 @@ class DocumentService:
             
             # 第二步：PDF转Markdown
             md_result = await self._convert_pdf_to_markdown(temp_pdf_path, output_path, params)
-            if not md_result['success']:
-                raise RuntimeError(f"PDF to Markdown conversion failed: {md_result.get('error', 'Unknown error')}")
-            
+            if not md_result or not md_result.get('success', False):
+                error_msg = md_result.get('error', 'Unknown error') if md_result else 'No result returned'
+                raise RuntimeError(f"PDF to Markdown conversion failed: {error_msg}")
+
             # 合并结果
             return {
                 'success': True,
                 'input_path': input_path,
                 'output_path': output_path,
                 'temp_pdf_path': temp_pdf_path,
-                'markdown_files': md_result.get('markdown_files', [output_path]),
+                'markdown_files': md_result.get('markdown_files', [output_path]) if md_result else [output_path],
                 'file_count': 1,
                 'conversion_type': 'office_to_markdown'
             }

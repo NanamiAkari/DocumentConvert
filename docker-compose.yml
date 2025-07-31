@@ -1,100 +1,38 @@
 version: '3.8'
 
 services:
-  mineru-cpu:
+  document-scheduler:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: mineru-cpu
-    restart: unless-stopped
+    image: document-scheduler:latest
+    container_name: document-scheduler
     ports:
-      - "8000:8000"  # API端口
-      - "7860:7860"  # Gradio Web界面端口
+      - "8000:8000"
     volumes:
-      - ./test:/app/input:ro  # 输入文件目录（只读）
-      - ./output:/app/output  # 输出文件目录
-      - ./docs:/app/docs:ro   # 文档目录（只读）
+      - ./test:/app/test:ro
+      - ./output:/app/output
+      - ./logs:/app/logs
+      - model-cache:/root/.cache/modelscope
     environment:
+      - MINERU_MODEL_SOURCE=modelscope
+      - CUDA_VISIBLE_DEVICES=0
       - PYTHONUNBUFFERED=1
-      - MINERU_CONFIG_PATH=/root/mineru.json
-    working_dir: /app
-    command: >
-      bash -c "
-        echo 'MinerU CPU模式服务启动中...' &&
-        echo '配置文件路径: /root/mineru.json' &&
-        echo '输入目录: /app/input' &&
-        echo '输出目录: /app/output' &&
-        mkdir -p /app/output &&
-        echo '服务已启动，保持运行状态...' &&
-        tail -f /dev/null
-      "
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s
-
-  # 仅API服务（轻量级）
-  mineru-api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: mineru-api
-    restart: unless-stopped
-    ports:
-      - "8001:8000"
-    volumes:
-      - ./test:/app/input:ro
-      - ./output:/app/output
-    environment:
-      - PYTHONUNBUFFERED=1
-      - MINERU_CONFIG_PATH=/root/mineru.json
-    working_dir: /app
-    command: >
-      bash -c "
-        echo 'MinerU API服务启动中...' &&
-        mkdir -p /app/output &&
-        python -m mineru.api --host 0.0.0.0 --port 8000
-      "
-    profiles:
-      - api-only
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
-
-  # 仅Web界面服务
-  mineru-web:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: mineru-web
-    restart: unless-stopped
-    ports:
-      - "7861:7860"
-    volumes:
-      - ./test:/app/input:ro
-      - ./output:/app/output
-    environment:
-      - PYTHONUNBUFFERED=1
-      - MINERU_CONFIG_PATH=/root/mineru.json
-    working_dir: /app
-    command: >
-      bash -c "
-        echo 'MinerU Web界面服务启动中...' &&
-        mkdir -p /app/output &&
-        python -m mineru.gradio --server-name 0.0.0.0 --server-port 7860
-      "
-    profiles:
-      - web-only
+      start_period: 120s
 
 volumes:
-  mineru_output:
+  model-cache:
     driver: local
-
-networks:
-  default:
-    name: mineru-network

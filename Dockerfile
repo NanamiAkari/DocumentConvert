@@ -58,14 +58,29 @@ COPY mineru.json /root/mineru.json
 # Create working directory
 WORKDIR /app
 
+# Copy application files
+COPY requirements.txt .
+COPY api/ ./api/
+COPY services/ ./services/
+COPY processors/ ./processors/
+COPY start.py .
+COPY __init__.py .
+
+# Install application dependencies in the virtual environment
+RUN /bin/bash -c "source /opt/mineru_venv/bin/activate && \
+    pip3 install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/"
+
+# Create task workspace directory
+RUN mkdir -p /app/task_workspace/output
+
 # Add virtual environment to PATH
 ENV PATH="/opt/mineru_venv/bin:$PATH"
 
 # Expose port for API
-EXPOSE 8000
+EXPOSE 8001
 
-# Set the entry point to activate the virtual environment
-ENTRYPOINT ["/bin/bash", "-c", "source /opt/mineru_venv/bin/activate && exec \"$@\"", "--"]
+# Set the entry point to activate the virtual environment and start the API
+ENTRYPOINT ["/bin/bash", "-c", "source /opt/mineru_venv/bin/activate && python -m uvicorn api.main:app --host 0.0.0.0 --port 8001"]
 
-# Default command
-CMD ["bash"]
+# Default command (can be overridden)
+CMD []

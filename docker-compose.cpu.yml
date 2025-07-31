@@ -1,0 +1,142 @@
+version: '3.8'
+
+services:
+  document-scheduler-cpu:
+    build:
+      context: .
+      dockerfile: Dockerfile.cpu
+    image: document-scheduler:cpu
+    container_name: document-scheduler-cpu
+    restart: unless-stopped
+    ports:
+      - "8000:8000"  # API端口
+    volumes:
+      - ./test:/app/test:ro  # 输入文件目录（只读）
+      - ./output:/app/output  # 输出文件目录
+      - ./logs:/app/logs      # 日志目录
+      - ./temp:/app/temp      # 临时文件目录
+      - ./docs:/app/docs:ro   # 文档目录（只读）
+    environment:
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=INFO
+      - MAX_CONCURRENT_TASKS=3  # CPU版本并发数适中
+      - TASK_CHECK_INTERVAL=5   # CPU版本检查间隔标准
+      - DEVICE_MODE=cpu
+      - CPU_THREADS=4
+      - MEMORY_LIMIT=4096
+      - OMP_NUM_THREADS=4
+      - MKL_NUM_THREADS=4
+      - OPENBLAS_NUM_THREADS=4
+    working_dir: /app
+    command: >
+      bash -c "
+        echo '文档转换调度系统 CPU版本 启动中...' &&
+        echo '配置信息:' &&
+        echo '  版本: CPU优化版' &&
+        echo '  API端口: 8000' &&
+        echo '  输入目录: /app/test' &&
+        echo '  输出目录: /app/output' &&
+        echo '  最大并发任务数: 3' &&
+        echo '  CPU线程数: 4' &&
+        echo '  内存限制: 4GB' &&
+        mkdir -p /app/output /app/logs /app/temp &&
+        echo '启动API服务器...' &&
+        python start.py
+      "
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 4G
+        reservations:
+          cpus: '2.0'
+          memory: 2G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s  # CPU版本启动较快
+    networks:
+      - document-scheduler-network
+
+  # 可选：Redis缓存服务（CPU版本）
+  redis-cpu:
+    image: redis:7-alpine
+    container_name: document-scheduler-redis-cpu
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_cpu_data:/data
+    command: redis-server --appendonly yes --maxmemory 1gb --maxmemory-policy allkeys-lru
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+    networks:
+      - document-scheduler-network
+    profiles:
+      - with-redis
+
+  # 可选：PostgreSQL数据库
+  postgres-cpu:
+    image: postgres:15-alpine
+    container_name: document-scheduler-postgres-cpu
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=document_scheduler
+      - POSTGRES_USER=scheduler
+      - POSTGRES_PASSWORD=scheduler123
+    volumes:
+      - postgres_cpu_data:/var/lib/postgresql/data
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+    networks:
+      - document-scheduler-network
+    profiles:
+      - with-database
+
+  # 系统监控服务（CPU版本）
+  system-monitor:
+    image: prom/node-exporter:latest
+    container_name: system-monitor-cpu
+    restart: unless-stopped
+    ports:
+      - "9100:9100"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.rootfs=/rootfs'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    networks:
+      - document-scheduler-network
+    profiles:
+      - with-monitoring
+
+volumes:
+  redis_cpu_data:
+    driver: local
+  postgres_cpu_data:
+    driver: local
+
+networks:
+  document-scheduler-network:
+    driver: bridge
+    name: document-scheduler-cpu-network

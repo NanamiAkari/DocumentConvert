@@ -1,0 +1,39 @@
+{
+  "device_mode": "gpu",
+  "gpu_memory_limit": 8192,
+  "models": {
+    "layout": "doclayout_yolo",
+    "formula": "unimernet",
+    "ocr": "paddle"
+  },
+  "layout": {
+    "model": "doclayout_yolo",
+    "device": "gpu",
+    "batch_size": 8
+  },
+  "formula": {
+    "model": "unimernet",
+    "device": "gpu",
+    "batch_size": 4
+  },
+  "ocr": {
+    "model": "paddle",
+    "device": "gpu",
+    "batch_size": 16,
+    "use_gpu": true,
+    "gpu_mem": 4000
+  },
+  "performance": {
+    "enable_gpu_acceleration": true,
+    "gpu_device_id": 0,
+    "mixed_precision": true,
+    "optimize_memory": true
+  },
+  "advanced": {
+    "parallel_processing": true,
+    "max_workers": 4,
+    "chunk_size": 1024,
+    "enable_tensorrt": false,
+    "enable_fp16": true
+  }
+}

@@ -6,10 +6,16 @@
 set -e
 
 # 配置变量
-COMPOSE_FILE="docker-compose.document-scheduler.yml"
+DEFAULT_COMPOSE_FILE="docker-compose.document-scheduler.yml"
+GPU_COMPOSE_FILE="docker-compose.gpu.yml"
+CPU_COMPOSE_FILE="docker-compose.cpu.yml"
 SERVICE_NAME="document-scheduler"
 IMAGE_NAME="document-scheduler"
 VERSION="v1.0.0"
+
+# 默认使用CPU版本
+COMPOSE_FILE="$CPU_COMPOSE_FILE"
+BUILD_TARGET="cpu"
 
 # 颜色输出
 RED='\033[0;31m'
@@ -55,6 +61,61 @@ check_docker() {
     log_info "使用Docker Compose: $DOCKER_COMPOSE"
 }
 
+# 检测GPU支持
+check_gpu_support() {
+    if command -v nvidia-smi &> /dev/null; then
+        if nvidia-smi &> /dev/null; then
+            log_info "检测到NVIDIA GPU支持"
+            return 0
+        else
+            log_warning "nvidia-smi命令存在但无法访问GPU"
+            return 1
+        fi
+    else
+        log_info "未检测到NVIDIA GPU支持"
+        return 1
+    fi
+}
+
+# 选择部署版本
+select_version() {
+    local version_type="$1"
+
+    case "$version_type" in
+        gpu)
+            if check_gpu_support; then
+                COMPOSE_FILE="$GPU_COMPOSE_FILE"
+                BUILD_TARGET="gpu"
+                log_info "选择GPU版本部署"
+            else
+                log_error "系统不支持GPU，无法使用GPU版本"
+                exit 1
+            fi
+            ;;
+        cpu)
+            COMPOSE_FILE="$CPU_COMPOSE_FILE"
+            BUILD_TARGET="cpu"
+            log_info "选择CPU版本部署"
+            ;;
+        auto)
+            if check_gpu_support; then
+                COMPOSE_FILE="$GPU_COMPOSE_FILE"
+                BUILD_TARGET="gpu"
+                log_info "自动选择GPU版本部署"
+            else
+                COMPOSE_FILE="$CPU_COMPOSE_FILE"
+                BUILD_TARGET="cpu"
+                log_info "自动选择CPU版本部署"
+            fi
+            ;;
+        *)
+            log_error "未知版本类型: $version_type"
+            log_info "支持的版本: gpu, cpu, auto"
+            exit 1
+            ;;
+    esac
+}
+
 # 检查必要的目录
 check_directories() {
     log_info "检查必要的目录..."
@@ -84,17 +145,35 @@ check_directories() {
 
 # 构建镜像
 build_image() {
-    log_info "开始构建Docker镜像..."
-    
-    if [ ! -f "Dockerfile.document-scheduler" ]; then
-        log_error "Dockerfile.document-scheduler 文件不存在"
+    local target_version="${1:-$BUILD_TARGET}"
+    log_info "开始构建Docker镜像 ($target_version 版本)..."
+
+    local dockerfile=""
+    case "$target_version" in
+        gpu)
+            dockerfile="Dockerfile.gpu"
+            ;;
+        cpu)
+            dockerfile="Dockerfile.cpu"
+            ;;
+        *)
+            dockerfile="Dockerfile.document-scheduler"
+            ;;
+    esac
+
+    if [ ! -f "$dockerfile" ]; then
+        log_error "Dockerfile文件不存在: $dockerfile"
         exit 1
     fi
-    
-    docker build -f Dockerfile.document-scheduler -t ${IMAGE_NAME}:latest .
-    docker tag ${IMAGE_NAME}:latest ${IMAGE_NAME}:${VERSION}
-    docker tag ${IMAGE_NAME}:latest ${IMAGE_NAME}:stable
-    
+
+    docker build -f "$dockerfile" -t "${IMAGE_NAME}:${target_version}" .
+    docker tag "${IMAGE_NAME}:${target_version}" "${IMAGE_NAME}:${target_version}-${VERSION}"
+
+    if [ "$target_version" = "cpu" ]; then
+        docker tag "${IMAGE_NAME}:${target_version}" "${IMAGE_NAME}:latest"
+        docker tag "${IMAGE_NAME}:${target_version}" "${IMAGE_NAME}:stable"
+    fi
+
     log_success "镜像构建完成"
     docker images | grep ${IMAGE_NAME}
 }
@@ -213,38 +292,53 @@ show_help() {
     echo "文档转换调度系统部署脚本"
     echo ""
     echo "使用方法:"
-    echo "  $0 [命令]"
+    echo "  $0 [命令] [选项]"
     echo ""
     echo "可用命令:"
-    echo "  start     启动服务"
-    echo "  stop      停止服务"
-    echo "  restart   重启服务"
-    echo "  status    查看服务状态"
-    echo "  health    检查API健康状态"
-    echo "  logs      查看服务日志"
-    echo "  build     构建Docker镜像"
-    echo "  cleanup   清理Docker资源"
-    echo "  help      显示此帮助信息"
+    echo "  start [gpu|cpu|auto]  启动服务"
+    echo "  stop                  停止服务"
+    echo "  restart [gpu|cpu|auto] 重启服务"
+    echo "  status                查看服务状态"
+    echo "  health                检查API健康状态"
+    echo "  logs                  查看服务日志"
+    echo "  build [gpu|cpu|both]  构建Docker镜像"
+    echo "  cleanup               清理Docker资源"
+    echo "  gpu-check             检查GPU支持"
+    echo "  help                  显示此帮助信息"
+    echo ""
+    echo "版本选项:"
+    echo "  gpu   使用GPU加速版本（需要NVIDIA GPU支持）"
+    echo "  cpu   使用CPU优化版本（适用于所有环境）"
+    echo "  auto  自动检测并选择最佳版本"
+    echo "  both  构建GPU和CPU两个版本"
     echo ""
     echo "示例:"
-    echo "  $0 start          # 启动服务"
-    echo "  $0 logs           # 查看日志"
-    echo "  $0 health         # 检查健康状态"
+    echo "  $0 start auto         # 自动选择版本启动服务"
+    echo "  $0 start gpu          # 使用GPU版本启动"
+    echo "  $0 start cpu          # 使用CPU版本启动"
+    echo "  $0 build both         # 构建两个版本"
+    echo "  $0 gpu-check          # 检查GPU支持"
+    echo "  $0 logs               # 查看日志"
 }
 
 # 主函数
 main() {
     # 检查Docker环境
     check_docker
-    
-    case "${1:-help}" in
+
+    local command="${1:-help}"
+    local version_option="${2:-auto}"
+
+    case "$command" in
         start)
+            select_version "$version_option"
             start_service
             ;;
         stop)
             stop_service
             ;;
         restart)
+            select_version "$version_option"
             restart_service
             ;;
         status)
@@ -257,16 +351,30 @@ main() {
             view_logs
             ;;
         build)
-            build_image
+            if [ "$version_option" = "both" ]; then
+                build_image "cpu"
+                build_image "gpu"
+            else
+                select_version "$version_option"
+                build_image "$BUILD_TARGET"
+            fi
             ;;
         cleanup)
             cleanup
+            ;;
+        gpu-check)
+            if check_gpu_support; then
+                log_success "系统支持GPU加速"
+                nvidia-smi
+            else
+                log_warning "系统不支持GPU加速"
+            fi
             ;;
         help|--help|-h)
             show_help
             ;;
         *)
-            log_error "未知命令: $1"
+            log_error "未知命令: $command"
             show_help
             exit 1
             ;;

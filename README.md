@@ -30,9 +30,11 @@
 
 ### 任务类型
 1. **office_to_pdf**: Office文档转PDF (使用LibreOffice)
-2. **pdf_to_markdown**: PDF转Markdown (使用MinerU)
-3. **batch_office_to_pdf**: 批量Office转PDF
-4. **batch_pdf_to_markdown**: 批量PDF转Markdown
+2. **pdf_to_markdown**: PDF转Markdown (基础转换)
+3. **office_to_markdown**: Office文档直接转Markdown (两步转换)
+4. **batch_office_to_pdf**: 批量Office转PDF
+5. **batch_pdf_to_markdown**: 批量PDF转Markdown
+6. **batch_office_to_markdown**: 批量Office转Markdown (推荐)
 
 ## 快速开始
 
@@ -72,6 +74,19 @@ curl -X POST http://localhost:8000/api/tasks \
   }'
 ```
 
+#### 批量Office转Markdown (推荐)
+```bash
+curl -X POST http://localhost:8000/api/tasks \
+  -H "Content-Type: application/json" \
+  -d '{
+    "task_type": "batch_office_to_markdown",
+    "input_path": "/workspace/test",
+    "output_path": "/workspace/output/markdown",
+    "priority": "normal",
+    "params": {"recursive": false, "force_reprocess": true}
+  }'
+```
+
 ### 3. 查看任务状态
 ```bash
 # 查看特定任务状态
@@ -79,6 +94,9 @@ curl http://localhost:8000/api/tasks/1
 
 # 查看队列统计
 curl http://localhost:8000/api/stats
+
+# 查看所有任务
+curl http://localhost:8000/api/tasks
 ```
 
 ## API接口
@@ -91,10 +109,12 @@ curl http://localhost:8000/api/stats
 - `GET /health` - 健康检查
 
 ### 便捷接口
-- `POST /api/tasks/office-to-pdf` - 直接创建Office转PDF任务
-- `POST /api/tasks/pdf-to-markdown` - 直接创建PDF转Markdown任务
-- `POST /api/tasks/batch-office-to-pdf` - 批量Office转PDF
-- `POST /api/tasks/batch-pdf-to-markdown` - 批量PDF转Markdown
+- `GET /api/shortcuts/office-to-pdf` - 直接创建Office转PDF任务
+- `GET /api/shortcuts/pdf-to-markdown` - 直接创建PDF转Markdown任务
+- `GET /api/shortcuts/office-to-markdown` - 直接创建Office转Markdown任务
+- `GET /api/shortcuts/batch-office-to-pdf` - 批量Office转PDF
+- `GET /api/shortcuts/batch-pdf-to-markdown` - 批量PDF转Markdown
+- `GET /api/shortcuts/batch-office-to-markdown` - 批量Office转Markdown (推荐)
 
 ## 配置说明
 

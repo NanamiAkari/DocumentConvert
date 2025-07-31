@@ -164,8 +164,9 @@ async def create_task(request: TaskCreateRequest):
     try:
         # 验证任务类型
         valid_task_types = {
-            'office_to_pdf', 'pdf_to_markdown', 
-            'batch_office_to_pdf', 'batch_pdf_to_markdown'
+            'office_to_pdf', 'pdf_to_markdown',
+            'batch_office_to_pdf', 'batch_pdf_to_markdown',
+            'office_to_markdown', 'batch_office_to_markdown'
         }
         
         if request.task_type not in valid_task_types:
@@ -190,7 +191,7 @@ async def create_task(request: TaskCreateRequest):
         
     except Exception as e:
         logger.error(f"Error creating task: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to create task: {str(e)}")
 
 
 @app.get("/api/tasks/{task_id}", response_model=TaskStatusResponse)

@@ -106,12 +106,12 @@ def start_api_server():
     """启动API服务器"""
     import uvicorn
     from api.main import app
-    
+
     logger.info("启动API服务器...")
     uvicorn.run(
         app,
         host="0.0.0.0",
-        port=8083,
+        port=8000,
         log_level="info"
     )
 
@@ -119,15 +119,11 @@ def start_api_server():
 async def main():
     """主函数"""
     logger.info("=== 文档转换调度系统启动 ===")
-    
+
     try:
-        # 创建输出目录
-        output_dir = Path('/workspace/output')
-        output_dir.mkdir(exist_ok=True)
-        
-        # 运行演示任务
-        await create_demo_tasks()
-        
+        # 启动API服务器
+        start_api_server()
+
     except KeyboardInterrupt:
         logger.info("用户中断程序")
     except Exception as e:
@@ -137,4 +133,11 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    # 可以选择运行演示任务或启动API服务器
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "demo":
+        # 运行演示任务
+        asyncio.run(create_demo_tasks())
+    else:
+        # 启动API服务器
+        start_api_server()

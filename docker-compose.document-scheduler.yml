@@ -1,0 +1,89 @@
+version: '3.8'
+
+services:
+  document-scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: document-scheduler
+    restart: unless-stopped
+    ports:
+      - "8000:8000"  # API端口
+    volumes:
+      - ./test:/workspace/test:ro  # 输入文件目录（只读）
+      - ./output:/workspace/output  # 输出文件目录
+      - ./logs:/workspace/logs      # 日志目录
+      - ./temp:/workspace/temp      # 临时文件目录
+      - ./docs:/workspace/docs:ro   # 文档目录（只读）
+    environment:
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=INFO
+      - MAX_CONCURRENT_TASKS=3
+      - TASK_CHECK_INTERVAL=5
+      - LIBREOFFICE_PATH=/usr/bin/libreoffice
+    working_dir: /workspace
+    command: >
+      bash -c "
+        echo '文档转换调度系统启动中...' &&
+        echo '配置信息:' &&
+        echo '  API端口: 8000' &&
+        echo '  输入目录: /workspace/test' &&
+        echo '  输出目录: /workspace/output' &&
+        echo '  最大并发任务数: 3' &&
+        mkdir -p /workspace/output /workspace/logs /workspace/temp &&
+        echo '启动API服务器...' &&
+        python start.py
+      "
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - document-scheduler-network
+
+  # 可选：Redis缓存服务（用于分布式部署）
+  redis:
+    image: redis:7-alpine
+    container_name: document-scheduler-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    networks:
+      - document-scheduler-network
+    profiles:
+      - with-redis
+
+  # 可选：PostgreSQL数据库（用于任务持久化）
+  postgres:
+    image: postgres:15-alpine
+    container_name: document-scheduler-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=document_scheduler
+      - POSTGRES_USER=scheduler
+      - POSTGRES_PASSWORD=scheduler123
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - document-scheduler-network
+    profiles:
+      - with-database
+
+volumes:
+  redis_data:
+    driver: local
+  postgres_data:
+    driver: local
+
+networks:
+  document-scheduler-network:
+    driver: bridge
+    name: document-scheduler-network

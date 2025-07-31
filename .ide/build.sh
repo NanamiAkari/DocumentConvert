@@ -21,43 +21,17 @@ if ! docker run --rm --gpus all nvidia/cuda:11.8-base-ubuntu22.04 nvidia-smi &> 
     echo "继续构建CPU版本..."
 fi
 
-# 检查模型文件是否存在
-MODEL_PATH="/root/.cache/modelscope"
-if [ ! -d "$MODEL_PATH" ]; then
-    echo "❌ 模型文件不存在: $MODEL_PATH"
-    echo "请先下载MinerU模型文件"
-    echo ""
-    echo "下载方法:"
-    echo "1. 使用MinerU命令: mineru-models-download"
-    echo "2. 使用Python脚本:"
-    echo "   python3 -c 'from mineru.cli.models_download import download_models; download_models()'"
-    echo "3. 手动下载到指定目录"
-    echo ""
-    exit 1
-fi
-
-echo "✅ 模型文件检查通过: $MODEL_PATH"
-
-# 显示模型文件大小和内容
-MODEL_SIZE=$(du -sh "$MODEL_PATH" 2>/dev/null | cut -f1 || echo "未知")
-echo "📦 模型文件大小: $MODEL_SIZE"
-
-# 检查关键模型目录
-echo "🔍 检查模型目录结构:"
-if [ -d "$MODEL_PATH/opendatalab" ]; then
-    echo "  ✅ opendatalab目录存在"
-    if [ -d "$MODEL_PATH/opendatalab/PDF-Extract-Kit" ]; then
-        echo "  ✅ PDF-Extract-Kit目录存在"
-    else
-        echo "  ⚠️  PDF-Extract-Kit目录不存在"
-    fi
-else
-    echo "  ⚠️  opendatalab目录不存在"
-fi
+# 检查Docker构建环境
+echo "🔍 检查Docker构建环境..."
+echo "注意: MinerU 2.0+ 版本将在构建过程中自动下载最新模型"
+echo "模型将通过 mineru-models-download 命令自动下载到容器内"
 
 # 构建Docker镜像
 echo "🔨 开始构建MinerU GPU基础镜像..."
 echo "镜像名称: docker.cnb.cool/aiedulab/library/mineru:latest"
+echo "MinerU版本: 2.1.9+"
+echo "CUDA版本: 11.8"
+echo "Python版本: 3.11"
 
 # 切换到.ide目录
 cd "$(dirname "$0")"
@@ -68,7 +42,7 @@ docker build \
     --progress=plain \
     -t docker.cnb.cool/aiedulab/library/mineru:latest \
     -f Dockerfile \
-    /
+    .
 
 if [ $? -eq 0 ]; then
     echo "✅ Docker镜像构建成功"
@@ -83,7 +57,11 @@ docker images docker.cnb.cool/aiedulab/library/mineru:latest
 
 # 测试镜像
 echo "🧪 测试镜像..."
-docker run --rm --gpus all docker.cnb.cool/aiedulab/library/mineru:latest python3 -c "
+
+# 首先尝试GPU测试
+if docker run --rm --gpus all docker.cnb.cool/aiedulab/library/mineru:latest python3 -c "import torch; print('GPU test passed')" 2>/dev/null; then
+    echo "✅ GPU支持可用，进行GPU测试"
+    docker run --rm --gpus all docker.cnb.cool/aiedulab/library/mineru:latest python3 -c "
 import torch
 print('PyTorch version:', torch.__version__)
 print('CUDA available:', torch.cuda.is_available())
@@ -92,17 +70,36 @@ if torch.cuda.is_available():
     print('GPU count:', torch.cuda.device_count())
 
 try:
-    from mineru.api import pdf_to_markdown
-    print('MinerU API: OK')
+    import mineru
+    print('MinerU import: OK')
 except Exception as e:
-    print('MinerU API Error:', e)
-
-import os
-if os.path.exists('/root/mineru.json'):
-    print('MinerU config: OK')
-else:
-    print('MinerU config: Missing')
+    print('MinerU import Error:', e)
 "
+else
+    echo "⚠️  GPU不可用，进行CPU测试"
+    docker run --rm docker.cnb.cool/aiedulab/library/mineru:latest python3 -c "
+import torch
+print('PyTorch version:', torch.__version__)
+print('CUDA available:', torch.cuda.is_available())
+
+try:
+    import mineru
+    print('MinerU import: OK')
+except Exception as e:
+    print('MinerU import Error:', e)
+
+# Test mineru command
+import subprocess
+try:
+    result = subprocess.run(['mineru', '--help'], capture_output=True, text=True, timeout=10)
+    if result.returncode == 0:
+        print('MinerU command: OK')
+    else:
+        print('MinerU command Error:', result.stderr)
+except Exception as e:
+    print('MinerU command Error:', e)
+"
+fi
 
 echo ""
 echo "🚀 构建完成！"

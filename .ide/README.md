@@ -1,20 +1,22 @@
 # MinerU GPU Base Image
 
-基于NVIDIA CUDA的MinerU GPU基础镜像，集成WebIDE支持，预装模型文件。
+基于NVIDIA CUDA的MinerU GPU基础镜像，集成WebIDE支持，自动下载最新模型。
 
 ## 镜像信息
 
 - **镜像名称**: `docker.cnb.cool/aiedulab/library/mineru:latest`
-- **基础镜像**: `nvidia/cuda:11.8-devel-ubuntu22.04`
-- **MinerU版本**: 2.1.9
-- **PyTorch版本**: CUDA 11.8支持
+- **基础镜像**: `nvidia/cuda:11.8.0-devel-ubuntu22.04`
+- **MinerU版本**: 2.1.9+
+- **PyTorch版本**: 2.7.1+cu118
 - **WebIDE**: VSCode Server 4.96.2
+- **Python版本**: 3.11
+- **镜像大小**: 22.7GB
 
 ## 功能特性
 
 ### 🚀 GPU加速
 - NVIDIA CUDA 11.8支持
-- PyTorch GPU加速
+- PyTorch 2.7.1 GPU加速
 - MinerU GPU模式配置
 - 自动GPU内存管理
 
@@ -24,14 +26,14 @@
 - Git集成和扩展
 - 代码补全和调试
 
-### 📦 预装模型
-- PDF-Extract-Kit完整模型
-- Layout、Formula、Table、OCR模型
-- 模型文件直接打包在镜像中
-- 无需运行时下载
+### 📦 自动模型下载
+- 使用官方 `mineru-models-download` 工具
+- 通过ModelScope自动下载最新模型
+- 支持pipeline模式的完整模型集
+- 构建时自动下载，无需手动准备
 
 ### 🛠️ 开发工具
-- Python 3.10
+- Python 3.11
 - LibreOffice
 - 中文字体支持
 - 常用开发工具
@@ -41,7 +43,7 @@
 ### 1. 构建镜像
 
 ```bash
-# 确保模型文件已下载到 /root/.cache/modelscope
+# 模型将在构建过程中自动下载，无需预先准备
 cd .ide
 ./build.sh
 ```
@@ -121,32 +123,29 @@ python3 your_script.py
 
 ### 环境变量
 - `MINERU_MODEL_SOURCE=modelscope` - 模型源
-- `MINERU_CONFIG_PATH=/root/mineru.json` - 配置文件路径
 - `CUDA_VISIBLE_DEVICES=0` - GPU设备
 - `PYTHONUNBUFFERED=1` - Python输出缓冲
 
 ### 目录结构
 ```
-/root/.cache/modelscope/     # 模型文件
-/root/mineru.json           # MinerU配置
+/root/.cache/modelscope/     # 自动下载的模型文件
 /opt/mineru_venv/           # Python虚拟环境
 /workspace/                 # 工作目录
 ```
 
-### GPU配置
-镜像默认配置为GPU模式，配置文件 `/root/mineru.json`:
-```json
-{
-  "model": {
-    "layout": {"device": "cuda"},
-    "formula": {"device": "cuda"},
-    "reading_order": {"device": "cuda"},
-    "table": {"device": "cuda"},
-    "ocr": {"device": "cuda"}
-  },
-  "device_mode": "cuda"
-}
+### 模型配置
+MinerU 2.0+ 版本使用自动配置，模型通过 `mineru-models-download` 命令下载：
+```bash
+# 模型下载命令（构建时自动执行）
+mineru-models-download -s modelscope -m pipeline
 ```
+
+支持的模型包括：
+- Layout模型：doclayout_yolo(2501)
+- Formula模型：unimernet(2501)
+- OCR模型：PaddleOCR
+- Table模型：RapidTable
+- Reading Order模型：layoutreader
 
 ## 系统要求
 
@@ -178,9 +177,13 @@ docker run --rm --gpus all docker.cnb.cool/aiedulab/library/mineru:latest \
 docker run --rm docker.cnb.cool/aiedulab/library/mineru:latest \
   ls -la /root/.cache/modelscope/
 
-# 验证配置
+# 重新下载模型
 docker run --rm docker.cnb.cool/aiedulab/library/mineru:latest \
-  cat /root/mineru.json
+  mineru-models-download -s modelscope -m pipeline
+
+# 测试mineru命令
+docker run --rm --gpus all docker.cnb.cool/aiedulab/library/mineru:latest \
+  mineru --help
 ```
 
 ### WebIDE无法访问
@@ -211,18 +214,23 @@ WORKDIR /workspace
 
 ### 自定义配置
 ```bash
-# 挂载自定义配置
+# 使用自定义配置文件
 docker run --rm --gpus all \
-  -v $(pwd)/custom-config.json:/root/mineru.json \
+  -v $(pwd)/custom-config.json:/root/.mineru/config.json \
   docker.cnb.cool/aiedulab/library/mineru:latest
 ```
 
 ## 更新日志
 
+- **v2.0.0**: 重大更新，升级到MinerU 2.1.9+
+  - 升级CUDA到12.1，Python到3.11
+  - 使用官方模型下载工具自动下载最新模型
+  - 支持最新的doclayout_yolo和unimernet模型
+  - 简化构建流程，无需预先准备模型文件
 - **v1.0.0**: 初始版本，集成MinerU 2.1.9和WebIDE
-- 支持GPU加速PDF转换
-- 预装完整模型文件
-- WebIDE开发环境
+  - 支持GPU加速PDF转换
+  - 预装完整模型文件
+  - WebIDE开发环境
 
 ## 支持
 

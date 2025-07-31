@@ -46,10 +46,10 @@ class TaskProcessor:
     4. 资源管理：工作空间管理和文件清理
     """
     
-    def __init__(self, 
+    def __init__(self,
                  max_concurrent_tasks: int = 3,
                  task_check_interval: int = 5,
-                 workspace_dir: str = "/workspace/test/document_scheduler/workspace"):
+                 workspace_dir: str = "/app/task_workspace"):
         """
         初始化任务处理器
         

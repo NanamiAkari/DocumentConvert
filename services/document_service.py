@@ -258,7 +258,7 @@ class DocumentService:
                     # 返回成功结果
                     return {
                         'success': True,
-                        'input_path': input_path,
+                        'input_path': str(input_file),
                         'output_path': str(output_file),
                         'markdown_files': [str(output_file)],
                         'file_count': 1,
@@ -316,7 +316,7 @@ class DocumentService:
             return {
                 'success': False,
                 'error': f"MinerU Python API conversion failed: {error_analysis}",
-                'input_path': input_path,
+                'input_path': str(input_file),
                 'output_path': str(output_file),
                 'conversion_type': 'pdf_to_markdown'
             }

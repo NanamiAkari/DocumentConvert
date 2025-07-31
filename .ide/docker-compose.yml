@@ -1,0 +1,90 @@
+version: '3.8'
+
+services:
+  mineru-webide:
+    image: docker.cnb.cool/aiedulab/library/mineru:latest
+    container_name: mineru-webide
+    ports:
+      - "8080:8080"  # WebIDE
+      - "8000:8000"  # API服务
+      - "7860:7860"  # Gradio界面
+    volumes:
+      - ./workspace:/workspace
+      - ./data:/data
+      - ./models:/root/.cache/modelscope:ro
+    environment:
+      - MINERU_MODEL_SOURCE=modelscope
+      - MINERU_CONFIG_PATH=/root/mineru.json
+      - CUDA_VISIBLE_DEVICES=0
+      - PYTHONUNBUFFERED=1
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    command: >
+      bash -c "
+        echo 'Starting MinerU WebIDE...' &&
+        echo 'WebIDE: http://localhost:8080' &&
+        echo 'API: http://localhost:8000' &&
+        echo 'Gradio: http://localhost:7860' &&
+        code-server --bind-addr 0.0.0.0:8080 --auth none /workspace
+      "
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  mineru-api:
+    image: docker.cnb.cool/aiedulab/library/mineru:latest
+    container_name: mineru-api
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./workspace:/workspace
+      - ./data:/data
+      - ./models:/root/.cache/modelscope:ro
+    environment:
+      - MINERU_MODEL_SOURCE=modelscope
+      - MINERU_CONFIG_PATH=/root/mineru.json
+      - CUDA_VISIBLE_DEVICES=0
+      - PYTHONUNBUFFERED=1
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    command: >
+      bash -c "
+        echo 'Starting MinerU API Server...' &&
+        cd /workspace &&
+        python3 -m uvicorn api.main:app --host 0.0.0.0 --port 8000
+      "
+    profiles:
+      - api-only
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  workspace:
+    driver: local
+  data:
+    driver: local
+  models:
+    driver: local
+
+networks:
+  default:
+    name: mineru-network

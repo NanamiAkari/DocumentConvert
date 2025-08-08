@@ -1,52 +1,44 @@
 #!/usr/bin/env python3
 """
 文档转换任务处理器
-
-基于MediaConvert项目的TaskProcessor设计，实现文档转换任务的调度和处理。
-支持PDF转换、Markdown转换等多种文档处理任务。
+复刻MediaConvert的任务处理逻辑，支持数据库持久化、云存储集成等企业级功能
 """
 
 import asyncio
-import json
+import threading
+import uuid
+import gc
 import os
-import time
-import traceback
+import shutil
 from datetime import datetime
-from typing import Optional, Dict, Any, List
-from dataclasses import dataclass
 from pathlib import Path
-import logging
+from typing import Dict, Any, Optional, List
 
+from database.models import DocumentTask, TaskStatus, TaskPriority, TaskCreateRequest
+from database.database_manager import DatabaseManager
+from services.s3_download_service import S3DownloadService
+from services.s3_upload_service import S3UploadService
+from utils.workspace_manager import WorkspaceManager
+from utils.logging_utils import configure_logging, get_task_logger
+from services.document_service import DocumentService
 
-@dataclass
-class Task:
-    """任务数据模型"""
-    task_id: int
-    task_type: str  # 'pdf_convert', 'markdown_convert', 'office_convert'
-    status: str     # 'pending', 'processing', 'completed', 'failed'
-    input_path: str
-    output_path: str
-    params: Dict[str, Any]
-    priority: str = 'normal'  # 'low', 'normal', 'high'
-    created_at: Optional[datetime] = None
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
-    error_message: Optional[str] = None
-    retry_count: int = 0
-    max_retries: int = 3
+logger = configure_logging(name=__name__)
 
 
 class TaskProcessor:
-    """文档转换任务处理器
-    
-    参考MediaConvert的TaskProcessor设计，实现统一的任务调度框架：
-    1. 多队列管理：获取队列、处理队列、更新队列、清理队列、回调队列
-    2. 异步并发处理：支持多任务并发执行
-    3. 错误处理和重试：智能重试机制
-    4. 资源管理：工作空间管理和文件清理
     """
-    
+    文档转换任务处理器
+    复刻MediaConvert的企业级任务处理架构，支持：
+    1. 数据库持久化存储
+    2. S3云存储集成
+    3. 智能任务调度
+    4. 完整的日志记录
+    5. 资源管理和清理
+    """
+
     def __init__(self,
+                 database_type: str = "sqlite",
+                 database_url: str = "sqlite:///./document_tasks.db",
                  max_concurrent_tasks: int = 3,
                  task_check_interval: int = 5,
                  workspace_dir: str = "/app/task_workspace"):
@@ -263,7 +255,7 @@ class TaskProcessor:
                 self.logger.error(f"Error in task_worker {worker_id}: {e}")
                 await asyncio.sleep(1)
     
-    async def _process_task(self, task: Task) -> Dict[str, Any]:
+    async def _process_task(self, task) -> Dict[str, Any]:
         """处理单个任务"""
         try:
             # 创建任务工作目录
@@ -292,7 +284,7 @@ class TaskProcessor:
                 'error': str(e)
             }
     
-    async def _process_pdf_convert(self, task: Task, workspace: Path) -> Dict[str, Any]:
+    async def _process_pdf_convert(self, task, workspace: Path) -> Dict[str, Any]:
         """处理PDF转换任务"""
         self.logger.info(f"Processing PDF convert task {task.task_id}")
         
@@ -308,7 +300,7 @@ class TaskProcessor:
             'conversion_type': 'pdf_to_markdown'
         }
     
-    async def _process_markdown_convert(self, task: Task, workspace: Path) -> Dict[str, Any]:
+    async def _process_markdown_convert(self, task, workspace: Path) -> Dict[str, Any]:
         """处理Markdown转换任务"""
         self.logger.info(f"Processing Markdown convert task {task.task_id}")
         
@@ -321,7 +313,7 @@ class TaskProcessor:
             'conversion_type': 'markdown_processing'
         }
     
-    async def _process_office_convert(self, task: Task, workspace: Path) -> Dict[str, Any]:
+    async def _process_office_convert(self, task, workspace: Path) -> Dict[str, Any]:
         """处理Office文档转换任务"""
         self.logger.info(f"Processing Office convert task {task.task_id}")
         
@@ -337,7 +329,7 @@ class TaskProcessor:
             'conversion_type': 'office_to_pdf'
         }
     
-    async def _process_office_to_pdf(self, task: Task, workspace: Path) -> Dict[str, Any]:
+    async def _process_office_to_pdf(self, task, workspace: Path) -> Dict[str, Any]:
         """处理Office文档转PDF任务"""
         self.logger.info(f"Processing Office to PDF task {task.task_id}")
         
@@ -370,7 +362,7 @@ class TaskProcessor:
             self.logger.error(f"Office to PDF conversion failed: {e}")
             raise
     
-    async def _process_pdf_to_markdown(self, task: Task, workspace: Path) -> Dict[str, Any]:
+    async def _process_pdf_to_markdown(self, task, workspace: Path) -> Dict[str, Any]:
         """处理PDF转Markdown任务"""
         self.logger.info(f"Processing PDF to Markdown task {task.task_id}")
         
@@ -403,7 +395,7 @@ class TaskProcessor:
             self.logger.error(f"PDF to Markdown conversion failed: {e}")
             raise
     
-    async def _process_office_to_markdown(self, task: Task, workspace: Path) -> Dict[str, Any]:
+    async def _process_office_to_markdown(self, task, workspace: Path) -> Dict[str, Any]:
         """处理Office文档直接转Markdown任务"""
         self.logger.info(f"Processing Office to Markdown task {task.task_id}")
         
@@ -437,7 +429,7 @@ class TaskProcessor:
             self.logger.error(f"Office to Markdown conversion failed: {e}")
             raise
     
-    async def _process_batch_office_to_markdown(self, task: Task, workspace: Path) -> Dict[str, Any]:
+    async def _process_batch_office_to_markdown(self, task, workspace: Path) -> Dict[str, Any]:
         """处理批量Office文档直接转Markdown任务"""
         self.logger.info(f"Processing batch Office to Markdown task {task.task_id}")
         
@@ -474,7 +466,7 @@ class TaskProcessor:
             self.logger.error(f"Batch Office to Markdown conversion failed: {e}")
             raise
     
-    async def _process_batch_pdf_to_markdown(self, task: Task, workspace: Path) -> Dict[str, Any]:
+    async def _process_batch_pdf_to_markdown(self, task, workspace: Path) -> Dict[str, Any]:
         """处理批量PDF转Markdown任务"""
         self.logger.info(f"Processing batch PDF to Markdown task {task.task_id}")
         

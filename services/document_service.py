@@ -93,6 +93,12 @@ class DocumentService:
                 return await self._batch_convert_office_to_pdf(input_path, output_path, params)
             elif conversion_type == 'batch_pdf_to_markdown':
                 return await self._batch_convert_pdf_to_markdown(input_path, output_path, params)
+            elif conversion_type == 'office_to_markdown':
+                return await self._convert_office_to_markdown(input_path, output_path, params)
+            elif conversion_type == 'image_to_markdown':
+                return await self._convert_image_to_markdown(input_path, output_path, params)
+            elif conversion_type == 'batch_image_to_markdown':
+                return await self._batch_convert_image_to_markdown(input_path, output_path, params)
             else:
                 raise ValueError(f"Unsupported conversion type: {conversion_type}")
                 
@@ -254,6 +260,15 @@ class DocumentService:
                         f.write(md_content_str)
 
                     self.logger.info(f"MinerU conversion completed successfully: {output_file}")
+
+                    # 清理临时目录
+                    try:
+                        if temp_output_dir.exists():
+                            import shutil
+                            shutil.rmtree(temp_output_dir)
+                            self.logger.debug(f"Cleaned up temp directory: {temp_output_dir}")
+                    except Exception as cleanup_error:
+                        self.logger.warning(f"Failed to cleanup temp directory: {cleanup_error}")
 
                     # 返回成功结果
                     return {
@@ -679,4 +694,155 @@ class DocumentService:
             'is_office_format': file_obj.suffix.lower() in self.office_formats,
             'is_pdf_format': file_obj.suffix.lower() in self.pdf_formats,
             'is_image_format': file_obj.suffix.lower() in self.image_formats
+        }
+
+    async def _convert_office_to_markdown(self,
+                                        input_path: str,
+                                        output_path: str,
+                                        params: Dict[str, Any]) -> Dict[str, Any]:
+        """Office文档直接转Markdown"""
+        self.logger.info(f"Converting Office document to Markdown: {input_path} -> {output_path}")
+
+        # 先转换为PDF
+        temp_pdf_dir = Path(output_path).parent / "temp"
+        temp_pdf_dir.mkdir(exist_ok=True)
+
+        input_file = Path(input_path)
+        temp_pdf_path = temp_pdf_dir / f"{input_file.stem}.pdf"
+
+        # Office -> PDF
+        pdf_result = await self._convert_office_to_pdf(input_path, str(temp_pdf_path), params)
+        if not pdf_result.get('success', False):
+            return pdf_result
+
+        # PDF -> Markdown
+        markdown_result = await self._convert_pdf_to_markdown(str(temp_pdf_path), output_path, params)
+
+        return markdown_result
+
+    async def _convert_image_to_markdown(self,
+                                       input_path: str,
+                                       output_path: str,
+                                       params: Dict[str, Any]) -> Dict[str, Any]:
+        """图片转Markdown（使用MinerU的OCR功能）"""
+        self.logger.info(f"Converting image to Markdown: {input_path} -> {output_path}")
+
+        input_file = Path(input_path)
+        output_file = Path(output_path)
+
+        # 检查输入文件
+        if not input_file.exists():
+            raise FileNotFoundError(f"Input file not found: {input_path}")
+
+        # 检查是否为支持的图片格式
+        if input_file.suffix.lower() not in self.image_formats:
+            raise ValueError(f"Unsupported image format: {input_file.suffix}")
+
+        # 确保输出目录存在
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            # 使用MinerU的OCR功能处理图片
+            from mineru.backend.pipeline.pipeline_analyze import pipeline_doc_analyze
+
+            # 清理GPU内存
+            self._clear_gpu_memory()
+
+            self.logger.info(f"Image file loaded: {input_file.name}, size: {input_file.stat().st_size} bytes")
+            self.logger.info("Starting MinerU OCR analysis for image...")
+
+            # 使用MinerU分析图片
+            result = pipeline_doc_analyze(
+                input_path=str(input_file),
+                output_path=str(output_file.parent),
+                output_format="markdown"
+            )
+
+            self.logger.info("MinerU OCR analysis completed, processing results...")
+
+            # 检查输出文件是否生成
+            if output_file.exists():
+                output_size = output_file.stat().st_size
+                self.logger.info(f"MinerU OCR conversion completed successfully: {output_file}")
+
+                # 清理GPU内存
+                self._clear_gpu_memory()
+
+                return {
+                    'success': True,
+                    'input_path': input_path,
+                    'output_path': output_path,
+                    'output_size': output_size,
+                    'conversion_type': 'image_to_markdown'
+                }
+            else:
+                raise Exception("MinerU OCR failed to generate output file")
+
+        except Exception as e:
+            self.logger.error(f"Image to Markdown conversion failed: {e}")
+            # 清理GPU内存
+            self._clear_gpu_memory()
+            raise
+
+    async def _batch_convert_image_to_markdown(self,
+                                             input_path: str,
+                                             output_path: str,
+                                             params: Dict[str, Any]) -> Dict[str, Any]:
+        """批量图片转Markdown"""
+        self.logger.info(f"Batch converting images to Markdown: {input_path} -> {output_path}")
+
+        input_dir = Path(input_path)
+        output_dir = Path(output_path)
+
+        if not input_dir.exists() or not input_dir.is_dir():
+            raise ValueError(f"Input directory not found: {input_path}")
+
+        # 确保输出目录存在
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # 查找所有图片文件
+        image_files = []
+        for ext in self.image_formats:
+            image_files.extend(input_dir.glob(f"*{ext}"))
+            image_files.extend(input_dir.glob(f"*{ext.upper()}"))
+
+        if not image_files:
+            raise ValueError(f"No image files found in {input_path}")
+
+        results = []
+        successful_conversions = 0
+        failed_conversions = 0
+
+        for image_file in image_files:
+            try:
+                output_file = output_dir / f"{image_file.stem}.md"
+                result = await self._convert_image_to_markdown(
+                    str(image_file),
+                    str(output_file),
+                    params
+                )
+                results.append(result)
+                if result.get('success', False):
+                    successful_conversions += 1
+                else:
+                    failed_conversions += 1
+
+            except Exception as e:
+                self.logger.error(f"Failed to convert {image_file}: {e}")
+                results.append({
+                    'success': False,
+                    'input_path': str(image_file),
+                    'error': str(e)
+                })
+                failed_conversions += 1
+
+        return {
+            'success': failed_conversions == 0,
+            'input_path': input_path,
+            'output_path': output_path,
+            'total_files': len(image_files),
+            'successful_conversions': successful_conversions,
+            'failed_conversions': failed_conversions,
+            'results': results,
+            'conversion_type': 'batch_image_to_markdown'
         }

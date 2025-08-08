@@ -254,6 +254,19 @@ class DatabaseManager:
             logger.error(f"Failed to query tasks: {e}")
             return []
 
+    async def get_tasks_by_status(self, status: str) -> List[DocumentTask]:
+        """根据状态获取任务列表"""
+        try:
+            async with self.get_session() as session:
+                query = select(DocumentTask).where(DocumentTask.status == status)
+                result = await session.execute(query)
+                tasks = result.scalars().all()
+                return list(tasks)
+
+        except Exception as e:
+            logger.error(f"Failed to get tasks by status {status}: {e}")
+            return []
+
     async def get_task_statistics(self) -> TaskStatistics:
         """获取任务统计信息"""
         try:

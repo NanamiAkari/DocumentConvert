@@ -101,13 +101,33 @@ async def create_document_task(
     这是一个统一的文档转换任务创建接口，支持多种任务类型和输入方式，复刻MediaConvert的设计。
     
     ## 支持的任务类型
-    
+
     - **office_to_pdf**: Office文档转PDF
     - **pdf_to_markdown**: PDF转Markdown
     - **office_to_markdown**: Office文档直接转Markdown
+    - **image_to_markdown**: 图片转Markdown（OCR识别）
     - **batch_office_to_pdf**: 批量Office转PDF
     - **batch_pdf_to_markdown**: 批量PDF转Markdown
     - **batch_office_to_markdown**: 批量Office转Markdown
+    - **batch_image_to_markdown**: 批量图片转Markdown
+
+    ## 任务重试功能
+
+    ### 单个任务重试
+    ```bash
+    curl -X POST "http://localhost:8000/api/tasks/{task_id}/retry"
+    ```
+
+    ### 批量重试失败任务
+    ```bash
+    curl -X POST "http://localhost:8000/api/tasks/retry-failed"
+    ```
+
+    重试功能会：
+    - 重置任务状态为pending
+    - 清除错误信息
+    - 重新放入处理队列
+    - 重置重试计数器
     
     ## 输入方式
     
@@ -222,6 +242,64 @@ async def create_document_task(
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
+@router.put("/tasks/{task_id}/task-type", summary="修改任务类型")
+async def update_task_type(
+    task_id: int,
+    new_task_type: str = Form(..., description="新的任务类型"),
+    processor: EnhancedTaskProcessor = Depends(get_task_processor)
+):
+    """修改任务的类型，适用于类型不匹配的失败任务"""
+    try:
+        # 验证任务类型
+        valid_types = [
+            "office_to_pdf", "pdf_to_markdown", "office_to_markdown", "image_to_markdown",
+            "batch_office_to_pdf", "batch_pdf_to_markdown", "batch_office_to_markdown", "batch_image_to_markdown"
+        ]
+
+        if new_task_type not in valid_types:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid task type. Supported types: {', '.join(valid_types)}"
+            )
+
+        # 获取任务
+        task = await processor.db_manager.get_task(str(task_id))
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        # 只允许修改失败的任务
+        if task.status not in ["failed"]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Can only modify failed tasks. Current status: {task.status}"
+            )
+
+        # 更新任务类型
+        success = await processor.db_manager.update_task(
+            str(task_id),
+            task_type=new_task_type
+        )
+
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to update task type")
+
+        logger.info(f"Task {task_id} type updated from {task.task_type} to {new_task_type}")
+
+        return {
+            "message": f"Task {task_id} type updated successfully",
+            "task_id": task_id,
+            "old_task_type": task.task_type,
+            "new_task_type": new_task_type,
+            "status": "ready_for_retry"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update task type for task {task_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
 @router.get("/tasks/{task_id}", summary="获取任务详情")
 async def get_task(
     task_id: str,
@@ -332,4 +410,50 @@ async def retry_task(
         raise
     except Exception as e:
         logger.error(f"Failed to retry task {task_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@router.post("/tasks/retry-failed", summary="批量重试失败的任务")
+async def retry_failed_tasks(
+    processor: EnhancedTaskProcessor = Depends(get_task_processor)
+):
+    """批量重试所有失败的任务"""
+    try:
+        # 获取所有失败的任务
+        failed_tasks = await processor.db_manager.get_tasks_by_status("failed")
+
+        if not failed_tasks:
+            return {"message": "No failed tasks found", "retried_count": 0}
+
+        retried_tasks = []
+
+        for task in failed_tasks:
+            try:
+                # 重置任务状态
+                await processor.db_manager.update_task(
+                    task.id,
+                    status="pending",
+                    retry_count=0,
+                    error_message=None
+                )
+
+                # 重新放入队列
+                await processor.fetch_queue.put(task.id)
+                retried_tasks.append(task.id)
+
+                logger.info(f"Task {task.id} queued for retry")
+
+            except Exception as e:
+                logger.error(f"Failed to retry task {task.id}: {e}")
+                continue
+
+        return {
+            "message": f"Successfully queued {len(retried_tasks)} failed tasks for retry",
+            "retried_count": len(retried_tasks),
+            "retried_task_ids": retried_tasks,
+            "total_failed_tasks": len(failed_tasks)
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to retry failed tasks: {e}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")

@@ -560,7 +560,22 @@ class DocumentService:
                 'input_path': input_path,
                 'output_path': output_path
             }
-    
+
+    async def convert_image_to_markdown(self, input_path: str, output_path: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
+        """图片转Markdown公共接口
+
+        使用MinerU的OCR功能将图片转换为Markdown
+
+        Args:
+            input_path: 输入图片路径
+            output_path: 输出Markdown文件路径
+            params: 转换参数
+
+        Returns:
+            转换结果字典
+        """
+        return await self._convert_image_to_markdown(input_path, output_path, params or {})
+
     async def batch_convert_office_to_markdown(self, input_dir: str, output_dir: str, **kwargs) -> Dict[str, Any]:
         """批量Office文档直接转Markdown公共接口
         
@@ -742,8 +757,9 @@ class DocumentService:
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
         try:
-            # 使用MinerU的OCR功能处理图片
-            from mineru.backend.pipeline.pipeline_analyze import pipeline_doc_analyze
+            # 使用MinerU命令行工具处理图片
+            temp_output_dir = output_file.parent / "mineru_temp"
+            temp_output_dir.mkdir(exist_ok=True)
 
             # 清理GPU内存
             self._clear_gpu_memory()
@@ -751,32 +767,50 @@ class DocumentService:
             self.logger.info(f"Image file loaded: {input_file.name}, size: {input_file.stat().st_size} bytes")
             self.logger.info("Starting MinerU OCR analysis for image...")
 
-            # 使用MinerU分析图片
-            result = pipeline_doc_analyze(
-                input_path=str(input_file),
-                output_path=str(output_file.parent),
-                output_format="markdown"
-            )
+            # 构建MinerU命令
+            cmd = [
+                "mineru",
+                "-p", str(input_file),
+                "-o", str(temp_output_dir)
+            ]
+
+            # 执行MinerU命令
+            import subprocess
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+
+            if result.returncode != 0:
+                raise RuntimeError(f"MinerU command failed: {result.stderr}")
 
             self.logger.info("MinerU OCR analysis completed, processing results...")
 
-            # 检查输出文件是否生成
-            if output_file.exists():
-                output_size = output_file.stat().st_size
-                self.logger.info(f"MinerU OCR conversion completed successfully: {output_file}")
+            # 查找生成的markdown文件
+            markdown_files = list(temp_output_dir.rglob("*.md"))
+            if not markdown_files:
+                raise RuntimeError("MinerU OCR conversion failed: No markdown file generated")
 
-                # 清理GPU内存
-                self._clear_gpu_memory()
+            # 复制第一个markdown文件到目标位置
+            source_md = markdown_files[0]
+            import shutil
+            shutil.copy2(source_md, output_file)
 
-                return {
-                    'success': True,
-                    'input_path': input_path,
-                    'output_path': output_path,
-                    'output_size': output_size,
-                    'conversion_type': 'image_to_markdown'
-                }
-            else:
-                raise Exception("MinerU OCR failed to generate output file")
+            # 清理临时目录
+            shutil.rmtree(temp_output_dir, ignore_errors=True)
+
+            output_size = output_file.stat().st_size
+            self.logger.info(f"MinerU OCR conversion completed successfully: {output_file}")
+
+            # 清理GPU内存
+            self._clear_gpu_memory()
+
+            return {
+                'success': True,
+                'input_path': input_path,
+                'output_path': output_path,
+                'markdown_files': [output_path],
+                'file_count': 1,
+                'conversion_type': 'image_to_markdown',
+                'output_size': output_size
+            }
 
         except Exception as e:
             self.logger.error(f"Image to Markdown conversion failed: {e}")

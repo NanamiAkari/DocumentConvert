@@ -501,7 +501,7 @@ class EnhancedTaskProcessor:
                 # 自动生成输出文件名
                 if task.task_type == 'office_to_pdf':
                     output_filename = input_file.stem + '.pdf'
-                elif task.task_type in ['pdf_to_markdown', 'office_to_markdown']:
+                elif task.task_type in ['pdf_to_markdown', 'office_to_markdown', 'image_to_markdown']:
                     output_filename = input_file.stem + '.md'
                 else:
                     output_filename = input_file.stem + '_converted' + input_file.suffix
@@ -524,6 +524,11 @@ class EnhancedTaskProcessor:
                 )
             elif task.task_type == 'office_to_markdown':
                 result = await self.doc_service.convert_office_to_markdown(
+                    input_path=str(input_file),
+                    output_path=str(output_file)
+                )
+            elif task.task_type == 'image_to_markdown':
+                result = await self.doc_service.convert_image_to_markdown(
                     input_path=str(input_file),
                     output_path=str(output_file)
                 )

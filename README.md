@@ -1,6 +1,6 @@
 # 文档转换调度系统 (Document Scheduler)
 
-基于 FastAPI 和 MinerU 2.0 的智能文档转换调度系统，支持 Office 文档转 PDF 和 PDF 转 Markdown 的异步任务处理。
+基于 FastAPI 和 MinerU 2.0 的智能文档转换调度系统，支持 Office 文档转 PDF、PDF 转 Markdown 和图片转 Markdown 的异步任务处理。
 
 ## 📊 测试验证结果
 
@@ -14,10 +14,12 @@
 
 ## 🌟 功能特性
 
-- 🔄 **多格式转换**: 支持Office文档(Word/Excel/PowerPoint)转PDF，PDF转Markdown
+- 🔄 **多格式转换**: 支持Office文档(Word/Excel/PowerPoint)转PDF，PDF转Markdown，图片转Markdown
+- 🖼️ **图片OCR**: 集成MinerU强大OCR功能，支持PNG/JPG/JPEG图片文档识别
 - 🤖 **AI驱动**: 集成MinerU 2.0 Python API，提供高质量PDF到Markdown转换
 - 🚀 **GPU加速**: 支持CUDA GPU加速，显著提升转换速度和质量
 - 📋 **任务调度**: 异步任务处理，支持优先级队列和并发控制
+- 🔄 **智能重试**: 支持单个任务重试、批量重试失败任务、任务类型修改
 - 🔍 **状态跟踪**: 实时任务状态查询和进度监控
 - 🛠️ **错误处理**: 完善的错误处理、重试机制和GPU内存管理
 - 📊 **RESTful API**: 标准的REST API接口，支持Swagger文档
@@ -56,9 +58,24 @@
 1. **office_to_pdf**: Office文档转PDF (使用LibreOffice)
 2. **pdf_to_markdown**: PDF转Markdown (基础转换)
 3. **office_to_markdown**: Office文档直接转Markdown (两步转换)
-4. **batch_office_to_pdf**: 批量Office转PDF
-5. **batch_pdf_to_markdown**: 批量PDF转Markdown
-6. **batch_office_to_markdown**: 批量Office转Markdown (推荐)
+4. **image_to_markdown**: 图片转Markdown (OCR识别) ✨ **新增**
+5. **batch_office_to_pdf**: 批量Office转PDF
+6. **batch_pdf_to_markdown**: 批量PDF转Markdown
+7. **batch_office_to_markdown**: 批量Office转Markdown (推荐)
+8. **batch_image_to_markdown**: 批量图片转Markdown ✨ **新增**
+
+## 🔄 任务重试功能 ✨ **新增**
+
+### 重试API
+- **单个任务重试**: `POST /api/tasks/{task_id}/retry`
+- **批量重试失败任务**: `POST /api/tasks/retry-failed`
+- **修改任务类型**: `PUT /api/tasks/{task_id}/task-type`
+
+### 重试功能特性
+- 🔄 自动重置任务状态为pending
+- 🧹 清除错误信息和重试计数
+- 📋 重新放入处理队列
+- 🎯 支持类型不匹配任务的修复
 
 ## 🚀 快速开始
 
@@ -157,6 +174,44 @@ curl -X POST http://localhost:8000/api/tasks \
     "priority": "normal",
     "params": {"recursive": false, "force_reprocess": true}
   }'
+```
+
+#### 图片转Markdown (OCR识别) ✨ **新增**
+```bash
+curl -X POST "http://localhost:8000/api/tasks/create" \
+  -F "task_type=image_to_markdown" \
+  -F "bucket_name=your-bucket" \
+  -F "file_path=path/to/image.png" \
+  -F "platform=your-platform" \
+  -F "priority=normal"
+```
+
+#### 批量图片转Markdown ✨ **新增**
+```bash
+curl -X POST "http://localhost:8000/api/tasks/create" \
+  -F "task_type=batch_image_to_markdown" \
+  -F "bucket_name=your-bucket" \
+  -F "file_path=path/to/images/" \
+  -F "platform=your-platform" \
+  -F "priority=normal"
+```
+
+### 任务重试功能 ✨ **新增**
+
+#### 重试单个任务
+```bash
+curl -X POST "http://localhost:8000/api/tasks/1/retry"
+```
+
+#### 批量重试失败任务
+```bash
+curl -X POST "http://localhost:8000/api/tasks/retry-failed"
+```
+
+#### 修改任务类型
+```bash
+curl -X PUT "http://localhost:8000/api/tasks/1/task-type" \
+  -F "new_task_type=image_to_markdown"
 ```
 
 ### 查看任务状态

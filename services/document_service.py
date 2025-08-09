@@ -261,7 +261,36 @@ class DocumentService:
 
                     self.logger.info(f"MinerU conversion completed successfully: {output_file}")
 
-                    # 清理临时目录
+                    # 保存JSON结构文件
+                    json_output_path = output_file.parent / f"{pdf_file_name}.json"
+                    try:
+                        import json
+                        with open(json_output_path, 'w', encoding='utf-8') as f:
+                            json.dump(middle_json, f, ensure_ascii=False, indent=2)
+                        self.logger.info(f"JSON structure saved: {json_output_path}")
+                    except Exception as json_error:
+                        self.logger.warning(f"Failed to save JSON structure: {json_error}")
+
+                    # 移动图片文件到输出目录
+                    images_output_dir = output_file.parent / "images"
+                    images_moved = []
+                    try:
+                        if Path(local_image_dir).exists():
+                            import shutil
+                            if images_output_dir.exists():
+                                shutil.rmtree(images_output_dir)
+                            shutil.move(local_image_dir, images_output_dir)
+
+                            # 统计移动的图片文件
+                            for img_file in images_output_dir.rglob("*"):
+                                if img_file.is_file() and img_file.suffix.lower() in ['.png', '.jpg', '.jpeg', '.gif', '.bmp']:
+                                    images_moved.append(str(img_file))
+
+                            self.logger.info(f"Moved {len(images_moved)} images to: {images_output_dir}")
+                    except Exception as move_error:
+                        self.logger.warning(f"Failed to move images: {move_error}")
+
+                    # 清理剩余的临时目录
                     try:
                         if temp_output_dir.exists():
                             import shutil
@@ -270,12 +299,15 @@ class DocumentService:
                     except Exception as cleanup_error:
                         self.logger.warning(f"Failed to cleanup temp directory: {cleanup_error}")
 
-                    # 返回成功结果
+                    # 返回成功结果，包含所有生成的文件
                     return {
                         'success': True,
                         'input_path': str(input_file),
                         'output_path': str(output_file),
                         'markdown_files': [str(output_file)],
+                        'json_files': [str(json_output_path)] if json_output_path.exists() else [],
+                        'image_files': images_moved,
+                        'images_dir': str(images_output_dir) if images_output_dir.exists() else None,
                         'file_count': 1,
                         'conversion_type': 'pdf_to_markdown'
                     }

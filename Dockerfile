@@ -7,6 +7,7 @@ WORKDIR /workspace
 # 设置环境变量
 ENV PYTHONPATH=/workspace
 ENV PYTHONUNBUFFERED=1
+ENV PATH="/opt/mineru_venv/bin:$PATH"
 
 # 复制项目文件
 COPY api/ /workspace/api/
@@ -26,8 +27,9 @@ RUN mkdir -p /workspace/output \
     && mkdir -p /workspace/temp \
     && mkdir -p /workspace/test
 
-# 安装必要的Python包（基础镜像已有大部分依赖）
-RUN pip install --no-cache-dir -r /workspace/requirements.txt -i https://mirrors.cloud.tencent.com/pypi/simple
+# 激活虚拟环境并安装必要的Python包
+RUN /opt/mineru_venv/bin/pip install --no-cache-dir sqlalchemy==2.0.23 -i https://mirrors.cloud.tencent.com/pypi/simple && \
+    /opt/mineru_venv/bin/pip install --no-cache-dir -r /workspace/requirements.txt -i https://mirrors.cloud.tencent.com/pypi/simple
 
 # 创建.env文件
 RUN echo "# S3/MinIO配置" > /workspace/.env && \
@@ -56,7 +58,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 EXPOSE 8000
 
 # 设置启动命令
-CMD ["python", "/workspace/main.py"]
+CMD ["/opt/mineru_venv/bin/python", "/workspace/main.py"]
 
 # 添加标签
 LABEL maintainer="AI Education Lab"

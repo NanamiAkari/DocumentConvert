@@ -556,44 +556,131 @@ class EnhancedTaskProcessor:
             return None
 
     async def _upload_output_file(self, task: DocumentTask, output_file: Path, task_logger) -> Dict[str, Any]:
-        """上传输出文件到S3"""
+        """上传输出文件到S3（支持完整目录上传）"""
         try:
-            task_logger.log_task_progress("uploading_to_s3", f"File: {output_file.name}")
+            # 检查是否是完整的输出目录（包含多个文件）
+            output_dir = output_file.parent
+            has_multiple_files = len(list(output_dir.iterdir())) > 1
+            has_images_dir = (output_dir / "images").exists()
+            has_json_file = any(f.suffix == '.json' for f in output_dir.iterdir() if f.is_file())
 
-            # 解析原始文件路径信息
-            original_bucket = None
-            original_folder = None
-            if task.bucket_name and task.file_path:
-                original_bucket = task.bucket_name
-                # 从file_path中提取文件夹路径
-                file_path_parts = task.file_path.split('/')
-                if len(file_path_parts) > 1:
-                    original_folder = '/'.join(file_path_parts[:-1])  # 除了文件名的所有部分
+            # 如果有多个文件（特别是图片目录或JSON文件），使用完整目录上传
+            if has_multiple_files and (has_images_dir or has_json_file):
+                task_logger.log_task_progress("uploading_to_s3", f"Complete result directory: {output_dir.name}")
 
-            # 上传到ai-file存储桶，遵循Media-Convert路径规则
-            result = await self.s3_upload_service.upload_converted_document(
-                local_path=str(output_file),
-                task_id=task.id,
-                original_filename=output_file.name,
-                original_bucket=original_bucket,
-                original_folder=original_folder,
-                task_type=task.task_type
-            )
+                # 解析原始文件路径信息
+                original_bucket = None
+                original_folder = None
+                original_filename = None
 
-            if result['success']:
-                task_logger.log_s3_operation("upload", result['s3_url'], True,
-                                            f"Size: {result['file_size']} bytes, Time: {result['upload_time']:.2f}s")
+                if task.bucket_name and task.file_path:
+                    original_bucket = task.bucket_name
+                    # 从file_path中提取文件夹路径和文件名
+                    file_path_parts = task.file_path.split('/')
+                    if len(file_path_parts) > 1:
+                        original_folder = '/'.join(file_path_parts[:-1])
+                    original_filename = file_path_parts[-1]
+                elif task.platform and task.input_path:
+                    # 根据平台设置bucket和folder
+                    original_filename = Path(task.input_path).name
+                    if task.platform == "gaojiaqi":
+                        original_bucket = "gaojiaqi"
+                        # 使用文件所在的目录路径作为folder
+                        input_path = Path(task.input_path)
+                        if len(input_path.parts) > 1:
+                            # 提取相对于某个基础路径的文件夹路径
+                            original_folder = str(input_path.parent).replace('/workspace/', '').replace('/workspace', '')
+                        else:
+                            original_folder = "documents"
+                    elif task.platform == "local":
+                        original_bucket = "local"
+                        original_folder = "uploads"
+                    # 可以根据需要添加更多平台
+                elif task.input_path:
+                    # 从本地路径提取文件名
+                    original_filename = Path(task.input_path).name
 
-                # 更新任务信息
-                await self.db_manager.update_task(
-                    task.id,
-                    output_url=result.get('http_url'),
-                    s3_urls=[result['s3_url']]
+                # 上传完整的转换结果
+                result = await self.s3_upload_service.upload_complete_conversion_result(
+                    output_dir_path=str(output_dir),
+                    task_id=task.id,
+                    original_filename=original_filename,
+                    original_bucket=original_bucket,
+                    original_folder=original_folder,
+                    task_type=task.task_type
                 )
-            else:
-                task_logger.log_s3_operation("upload", f"task_{task.id}/{output_file.name}", False, result.get('error'))
 
-            return result
+                if result['success']:
+                    task_logger.log_s3_operation("upload", result.get('s3_prefix', f"task_{task.id}"), True,
+                                                f"Files: {result['total_files']}, Size: {result['total_size']} bytes")
+
+                    # 收集所有上传文件的URL
+                    s3_urls = [file_info['s3_url'] for file_info in result.get('uploaded_files', [])]
+
+                    # 更新任务信息
+                    await self.db_manager.update_task(
+                        task.id,
+                        output_url=result.get('s3_url'),  # 主要文件URL
+                        s3_urls=s3_urls
+                    )
+                else:
+                    task_logger.log_s3_operation("upload", f"task_{task.id}/complete", False, result.get('error'))
+
+                return result
+
+            else:
+                # 单文件上传（原有逻辑）
+                task_logger.log_task_progress("uploading_to_s3", f"File: {output_file.name}")
+
+                # 解析原始文件路径信息
+                original_bucket = None
+                original_folder = None
+                if task.bucket_name and task.file_path:
+                    original_bucket = task.bucket_name
+                    # 从file_path中提取文件夹路径
+                    file_path_parts = task.file_path.split('/')
+                    if len(file_path_parts) > 1:
+                        original_folder = '/'.join(file_path_parts[:-1])  # 除了文件名的所有部分
+                elif task.platform and task.input_path:
+                    # 根据平台设置bucket和folder
+                    if task.platform == "gaojiaqi":
+                        original_bucket = "gaojiaqi"
+                        # 使用文件所在的目录路径作为folder
+                        input_path = Path(task.input_path)
+                        if len(input_path.parts) > 1:
+                            # 提取相对于某个基础路径的文件夹路径
+                            original_folder = str(input_path.parent).replace('/workspace/', '').replace('/workspace', '')
+                        else:
+                            original_folder = "documents"
+                    elif task.platform == "local":
+                        original_bucket = "local"
+                        original_folder = "uploads"
+                    # 可以根据需要添加更多平台
+
+                # 上传到ai-file存储桶，遵循Media-Convert路径规则
+                result = await self.s3_upload_service.upload_converted_document(
+                    local_path=str(output_file),
+                    task_id=task.id,
+                    original_filename=output_file.name,
+                    original_bucket=original_bucket,
+                    original_folder=original_folder,
+                    task_type=task.task_type
+                )
+
+                if result['success']:
+                    task_logger.log_s3_operation("upload", result['s3_url'], True,
+                                                f"Size: {result['file_size']} bytes, Time: {result['upload_time']:.2f}s")
+
+                    # 更新任务信息
+                    await self.db_manager.update_task(
+                        task.id,
+                        output_url=result.get('http_url'),
+                        s3_urls=[result['s3_url']]
+                    )
+                else:
+                    task_logger.log_s3_operation("upload", f"task_{task.id}/{output_file.name}", False, result.get('error'))
+
+                return result
 
         except Exception as e:
             task_logger.error(f"Failed to upload output file: {e}")

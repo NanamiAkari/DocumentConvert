@@ -211,6 +211,108 @@ class S3UploadService:
                 'error_type': type(e).__name__
             }
     
+    async def upload_directory(self,
+                             local_dir_path: str,
+                             s3_prefix: str,
+                             bucket_name: Optional[str] = None,
+                             s3_config: Optional[Dict[str, Any]] = None,
+                             metadata: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+        """
+        上传整个目录到S3
+
+        Args:
+            local_dir_path: 本地目录路径
+            s3_prefix: S3前缀路径
+            bucket_name: S3存储桶名称
+            s3_config: S3配置
+            metadata: 文件元数据
+
+        Returns:
+            上传结果字典
+        """
+        try:
+            local_dir = Path(local_dir_path)
+            if not local_dir.exists() or not local_dir.is_dir():
+                raise ValueError(f"Local directory not found or not a directory: {local_dir_path}")
+
+            uploaded_files = []
+            failed_files = []
+            total_size = 0
+
+            # 递归遍历目录中的所有文件
+            for file_path in local_dir.rglob("*"):
+                if file_path.is_file():
+                    # 计算相对路径
+                    relative_path = file_path.relative_to(local_dir)
+                    s3_key = f"{s3_prefix.rstrip('/')}/{relative_path.as_posix()}"
+
+                    try:
+                        # 为每个文件添加特定的元数据（使用base64编码处理中文）
+                        file_metadata = metadata.copy() if metadata else {}
+                        import base64
+                        relative_path_b64 = base64.b64encode(str(relative_path).encode('utf-8')).decode('ascii')
+                        file_metadata.update({
+                            'relative-path-base64': relative_path_b64,
+                            'file-type': file_path.suffix.lower(),
+                            'upload-batch': 'directory-upload'
+                        })
+
+                        result = await self.upload_file(
+                            local_file_path=str(file_path),
+                            s3_key=s3_key,
+                            bucket_name=bucket_name,
+                            s3_config=s3_config,
+                            metadata=file_metadata
+                        )
+
+                        if result['success']:
+                            uploaded_files.append({
+                                'local_path': str(file_path),
+                                'relative_path': str(relative_path),
+                                's3_key': s3_key,
+                                's3_url': result['s3_url'],
+                                'file_size': result['file_size']
+                            })
+                            total_size += result['file_size']
+                            logger.info(f"Uploaded file: {relative_path} -> {s3_key}")
+                        else:
+                            failed_files.append({
+                                'local_path': str(file_path),
+                                'relative_path': str(relative_path),
+                                's3_key': s3_key,
+                                'error': result.get('error')
+                            })
+                            logger.error(f"Failed to upload file: {relative_path} - {result.get('error')}")
+
+                    except Exception as e:
+                        failed_files.append({
+                            'local_path': str(file_path),
+                            'relative_path': str(relative_path),
+                            's3_key': s3_key,
+                            'error': str(e)
+                        })
+                        logger.error(f"Exception uploading file: {relative_path} - {e}")
+
+            success = len(failed_files) == 0
+            return {
+                'success': success,
+                'uploaded_files': uploaded_files,
+                'failed_files': failed_files,
+                'total_files': len(uploaded_files) + len(failed_files),
+                'uploaded_count': len(uploaded_files),
+                'failed_count': len(failed_files),
+                'total_size': total_size,
+                's3_prefix': s3_prefix
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to upload directory {local_dir_path}: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'error_type': type(e).__name__
+            }
+
     async def upload_converted_document(self,
                                       local_path: str,
                                       task_id: int,
@@ -237,16 +339,22 @@ class S3UploadService:
             local_file = Path(local_path)
             filename = original_filename or local_file.name
 
-            # 按照Media-Convert规则构建路径：{original_bucket}/{original_folder}/{task_type}/{filename}
-            if original_bucket and original_folder:
+            # 按照要求的路径规则构建：{original_bucket}/{原来文件的文件夹路径+文件名(去掉后缀)}/{类型(pdf/markdown)}/{filename}
+            if original_bucket and original_folder and original_filename:
                 # 清理文件夹路径，移除开头和结尾的斜杠
-                clean_folder = original_folder.strip('/')
+                folder_path = original_folder.strip('/')
+                # 获取原始文件名（去掉后缀）
+                original_name_without_ext = Path(original_filename).stem
+                # 根据任务类型确定类型目录
                 if task_type == "pdf_to_markdown":
-                    s3_key = f"{original_bucket}/{clean_folder}/markdown/{filename}"
+                    type_dir = "markdown"
                 elif task_type == "office_to_pdf":
-                    s3_key = f"{original_bucket}/{clean_folder}/pdf/{filename}"
+                    type_dir = "pdf"
                 else:
-                    s3_key = f"{original_bucket}/{clean_folder}/converted/{filename}"
+                    type_dir = "converted"
+
+                # 构建路径：{original_bucket}/{文件夹路径+原始文件名(无后缀)}/{类型}/{filename}
+                s3_key = f"{original_bucket}/{folder_path}/{original_name_without_ext}/{type_dir}/{filename}"
             else:
                 # 使用原有的converted/{task_id}结构作为后备
                 s3_key = f"converted/{task_id}/{filename}"
@@ -279,9 +387,106 @@ class S3UploadService:
                 logger.info(f"Document uploaded successfully for task {task_id}: {result['s3_url']}")
             
             return result
-            
+
         except Exception as e:
             logger.error(f"Failed to upload converted document for task {task_id}: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'error_type': type(e).__name__
+            }
+
+    async def upload_complete_conversion_result(self,
+                                              output_dir_path: str,
+                                              task_id: int,
+                                              original_filename: Optional[str] = None,
+                                              original_bucket: Optional[str] = None,
+                                              original_folder: Optional[str] = None,
+                                              task_type: str = "document-conversion") -> Dict[str, Any]:
+        """
+        上传完整的转换结果（包括Markdown、JSON、图片等所有文件）
+
+        Args:
+            output_dir_path: 输出目录路径
+            task_id: 任务ID
+            original_filename: 原始文件名
+            original_bucket: 原始文件所在的bucket
+            original_folder: 原始文件所在的文件夹
+            task_type: 任务类型
+
+        Returns:
+            上传结果字典
+        """
+        try:
+            output_dir = Path(output_dir_path)
+            if not output_dir.exists() or not output_dir.is_dir():
+                raise ValueError(f"Output directory not found: {output_dir_path}")
+
+            # 构建S3前缀路径 - 使用统一的路径规则
+            if original_bucket and original_folder and original_filename:
+                folder_path = original_folder.strip('/')
+                # 获取原始文件名（去掉后缀）
+                original_name_without_ext = Path(original_filename).stem
+                # 根据任务类型确定类型目录
+                if task_type == "pdf_to_markdown":
+                    type_dir = "markdown"
+                elif task_type == "office_to_pdf":
+                    type_dir = "pdf"
+                else:
+                    type_dir = "converted"
+
+                # 构建前缀路径：{original_bucket}/{文件夹路径+原始文件名(无后缀)}/{类型}
+                s3_prefix = f"{original_bucket}/{folder_path}/{original_name_without_ext}/{type_dir}"
+            else:
+                s3_prefix = f"converted/{task_id}"
+
+            # 准备元数据
+            import base64
+            encoded_filename = base64.b64encode((original_filename or "").encode('utf-8')).decode('ascii') if original_filename else ""
+            encoded_folder = base64.b64encode((original_folder or "").encode('utf-8')).decode('ascii') if original_folder else ""
+
+            metadata = {
+                'task-id': str(task_id),
+                'upload-time': datetime.now().isoformat(),
+                'conversion-type': task_type,
+                'original-bucket': original_bucket or "",
+                'original-filename-base64': encoded_filename,
+                'original-folder-base64': encoded_folder,
+                'upload-type': 'complete-conversion-result'
+            }
+
+            # 上传整个目录
+            result = await self.upload_directory(
+                local_dir_path=str(output_dir),
+                s3_prefix=s3_prefix,
+                metadata=metadata
+            )
+
+            if result['success']:
+                logger.info(f"Complete conversion result uploaded for task {task_id}: {result['uploaded_count']} files, {result['total_size']} bytes")
+
+                # 构建主要文件的URL（通常是Markdown文件）
+                main_file_url = None
+                for uploaded_file in result['uploaded_files']:
+                    if uploaded_file['relative_path'].endswith('.md'):
+                        main_file_url = uploaded_file['s3_url']
+                        break
+
+                return {
+                    'success': True,
+                    's3_prefix': s3_prefix,
+                    's3_url': main_file_url,  # 主要文件URL（兼容现有代码）
+                    'uploaded_files': result['uploaded_files'],
+                    'total_files': result['uploaded_count'],
+                    'total_size': result['total_size'],
+                    'file_size': result['total_size'],  # 兼容现有代码
+                    'upload_time': (datetime.now() - datetime.fromisoformat(metadata['upload-time'].replace('Z', '+00:00'))).total_seconds()
+                }
+            else:
+                return result
+
+        except Exception as e:
+            logger.error(f"Failed to upload complete conversion result for task {task_id}: {e}")
             return {
                 'success': False,
                 'error': str(e),

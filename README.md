@@ -36,7 +36,7 @@ docker run -d \
   --name document-converter \
   -p 8000:8000 \
   --gpus all \
-  -v $(pwd)/data/database:/app/database \
+  -v /raid5/data/document-convert/database:/app/database \
   -v $(pwd)/data/logs:/app/log_files \
   -v $(pwd)/data/workspace:/app/task_workspace \
   -e S3_ENDPOINT=http://your-minio-server:9000 \

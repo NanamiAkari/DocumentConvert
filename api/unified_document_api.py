@@ -66,8 +66,80 @@ async def health_check():
 @router.post(
     "/tasks/create",
     response_model=TaskResponse,
-    summary="统一文档转换任务创建接口",
-    description="支持多种任务类型和输入方式的统一创建接口，复刻MediaConvert的设计"
+    summary="创建文档转换任务",
+    description="""
+    ## 创建文档转换任务
+
+    支持从S3存储创建各种类型的文档转换任务。
+
+    ### 📋 支持的任务类型
+    - **pdf_to_markdown**: PDF转Markdown，输出.md文件、.json结构文件和图片
+    - **office_to_pdf**: Office文档转PDF，支持.doc/.docx/.xls/.xlsx/.ppt/.pptx
+    - **office_to_markdown**: Office文档转Markdown，两步转换(先转PDF再转Markdown)
+
+    ### 📁 S3路径规则
+    **输入路径格式**: `s3://{bucket_name}/{file_path}`
+
+    **输出路径格式**: `s3://ai-file/{original_bucket}/{file_name_without_ext}/{conversion_type}/`
+
+    ### 📊 优先级说明
+    - **high**: 高优先级，立即处理
+    - **normal**: 普通优先级，按队列顺序处理
+    - **low**: 低优先级，在其他任务完成后处理
+
+    ### 💡 使用示例
+    ```bash
+    # PDF转Markdown
+    curl -X POST "http://localhost:8000/api/tasks/create" \\
+      -F "task_type=pdf_to_markdown" \\
+      -F "bucket_name=documents" \\
+      -F "file_path=reports/annual_report.pdf" \\
+      -F "platform=your-platform" \\
+      -F "priority=high"
+
+    # Office转PDF
+    curl -X POST "http://localhost:8000/api/tasks/create" \\
+      -F "task_type=office_to_pdf" \\
+      -F "bucket_name=documents" \\
+      -F "file_path=presentations/quarterly.pptx" \\
+      -F "platform=your-platform" \\
+      -F "priority=normal"
+    ```
+    """,
+    responses={
+        200: {
+            "description": "任务创建成功",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "task_id": 123,
+                        "message": "Document conversion task 123 created successfully",
+                        "status": "pending"
+                    }
+                }
+            }
+        },
+        400: {
+            "description": "请求参数错误",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Invalid task_type. Supported types: pdf_to_markdown, office_to_pdf, office_to_markdown"
+                    }
+                }
+            }
+        },
+        500: {
+            "description": "服务器内部错误",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Internal server error: Failed to create task"
+                    }
+                }
+            }
+        }
+    }
 )
 async def create_document_task(
     request: Request,
@@ -300,7 +372,84 @@ async def update_task_type(
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
-@router.get("/tasks/{task_id}", summary="获取任务详情")
+@router.get(
+    "/tasks/{task_id}",
+    summary="获取任务详情",
+    description="""
+    ## 获取任务详细信息
+
+    根据任务ID获取任务的完整状态信息，包括输入输出路径、处理时间、S3 URLs等。
+
+    ### 📊 任务状态说明
+    - **pending**: 等待处理
+    - **processing**: 正在处理
+    - **completed**: 处理完成
+    - **failed**: 处理失败
+
+    ### 💡 使用示例
+    ```bash
+    curl "http://localhost:8000/api/tasks/123"
+    ```
+
+    ### 📁 响应中的重要字段
+    - **output_url**: 主要输出文件的S3路径
+    - **s3_urls**: 所有输出文件的S3路径列表
+    - **task_processing_time**: 任务处理耗时(秒)
+    - **file_size_bytes**: 输入文件大小
+    """,
+    responses={
+        200: {
+            "description": "任务详情",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "id": 123,
+                        "task_type": "pdf_to_markdown",
+                        "status": "completed",
+                        "priority": "high",
+                        "bucket_name": "documents",
+                        "file_path": "reports/annual_report.pdf",
+                        "platform": "your-platform",
+                        "input_path": "/app/task_workspace/task_123/input/annual_report.pdf",
+                        "output_path": "/app/task_workspace/task_123/output/annual_report.md",
+                        "output_url": "s3://ai-file/documents/annual_report/markdown/annual_report.md",
+                        "s3_urls": [
+                            "s3://ai-file/documents/annual_report/markdown/annual_report.md",
+                            "s3://ai-file/documents/annual_report/markdown/annual_report.json",
+                            "s3://ai-file/documents/annual_report/markdown/images/chart1.jpg",
+                            "s3://ai-file/documents/annual_report/markdown/images/table1.jpg"
+                        ],
+                        "file_size_bytes": 1048576,
+                        "created_at": "2025-08-09T10:00:00",
+                        "started_at": "2025-08-09T10:01:00",
+                        "completed_at": "2025-08-09T10:03:30",
+                        "task_processing_time": 150.5,
+                        "result": {
+                            "success": True,
+                            "conversion_type": "pdf_to_markdown",
+                            "upload_result": {
+                                "success": True,
+                                "total_files": 4,
+                                "total_size": 2097152
+                            }
+                        },
+                        "error_message": None
+                    }
+                }
+            }
+        },
+        404: {
+            "description": "任务不存在",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Task 123 not found"
+                    }
+                }
+            }
+        }
+    }
+)
 async def get_task(
     task_id: str,
     processor: EnhancedTaskProcessor = Depends(get_task_processor)
@@ -320,7 +469,68 @@ async def get_task(
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
-@router.get("/tasks", summary="查询任务列表")
+@router.get(
+    "/tasks",
+    summary="查询任务列表",
+    description="""
+    ## 查询任务列表
+
+    支持多种过滤条件的任务列表查询，可用于监控和管理任务。
+
+    ### 🔍 过滤参数
+    - **status**: 按状态过滤 (pending, processing, completed, failed)
+    - **priority**: 按优先级过滤 (high, normal, low)
+    - **task_type**: 按任务类型过滤 (pdf_to_markdown, office_to_pdf, office_to_markdown)
+    - **platform**: 按平台过滤
+    - **limit**: 返回结果数量限制 (默认20)
+    - **offset**: 分页偏移量 (默认0)
+
+    ### 💡 使用示例
+    ```bash
+    # 查询所有任务
+    curl "http://localhost:8000/api/tasks"
+
+    # 查询已完成的PDF转Markdown任务
+    curl "http://localhost:8000/api/tasks?status=completed&task_type=pdf_to_markdown&limit=10"
+
+    # 分页查询
+    curl "http://localhost:8000/api/tasks?offset=20&limit=10"
+    ```
+    """,
+    responses={
+        200: {
+            "description": "任务列表",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "tasks": [
+                            {
+                                "id": 123,
+                                "task_type": "pdf_to_markdown",
+                                "status": "completed",
+                                "priority": "high",
+                                "bucket_name": "documents",
+                                "file_path": "reports/annual_report.pdf",
+                                "platform": "your-platform",
+                                "output_url": "s3://ai-file/documents/annual_report/markdown/annual_report.md",
+                                "created_at": "2025-08-09T10:00:00",
+                                "completed_at": "2025-08-09T10:03:30",
+                                "task_processing_time": 150.5
+                            }
+                        ],
+                        "total": 1,
+                        "offset": 0,
+                        "limit": 20,
+                        "filters": {
+                            "status": "completed",
+                            "task_type": "pdf_to_markdown"
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 async def query_tasks(
     status: Optional[str] = None,
     priority: Optional[str] = None,
@@ -330,7 +540,7 @@ async def query_tasks(
     offset: int = 0,
     processor: EnhancedTaskProcessor = Depends(get_task_processor)
 ):
-    """查询任务列表"""
+    """查询任务列表，支持多种过滤条件"""
     try:
         filter_params = QueryTasksFilter(
             status=status,

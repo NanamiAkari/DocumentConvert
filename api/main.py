@@ -73,10 +73,38 @@ async def lifespan(app: FastAPI):
 
 # 创建FastAPI应用
 app = FastAPI(
-    title="Document Scheduler API",
-    description="文档转换调度系统API",
-    version="1.0.0",
-    lifespan=lifespan
+    title="Document Conversion Service API",
+    description="""
+    ## 智能文档转换服务API
+
+    基于MinerU的高质量文档转换服务，支持PDF、Office文档的智能转换，具备完整的S3集成和异步处理能力。
+
+    ### 🚀 主要功能
+    - **PDF转Markdown**: 使用MinerU 2.0进行高质量PDF解析，支持表格、图片、公式识别
+    - **Office转PDF**: 支持Word、Excel、PowerPoint转PDF，保持格式完整性
+    - **S3集成**: 自动从S3/MinIO下载和上传文件，支持多bucket
+    - **异步处理**: 基于队列的异步任务处理，支持优先级调度
+    - **进度跟踪**: 实时任务状态和进度监控，支持重试机制
+
+    ### 📁 S3路径规则
+    - **输入路径**: `s3://{bucket_name}/{file_path}`
+    - **输出路径**: `s3://ai-file/{original_bucket}/{file_name_without_ext}/{conversion_type}/{output_files}`
+
+    ### 🔧 支持的任务类型
+    - `pdf_to_markdown`: PDF转Markdown
+    - `office_to_pdf`: Office文档转PDF
+    - `office_to_markdown`: Office文档转Markdown (两步转换)
+
+    ### 📊 优先级设置
+    - `high`: 高优先级，优先处理
+    - `normal`: 普通优先级，正常处理
+    - `low`: 低优先级，最后处理
+    """,
+    version="2.0.0",
+    lifespan=lifespan,
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json"
 )
 
 # 添加CORS中间件

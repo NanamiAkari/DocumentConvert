@@ -12,9 +12,13 @@ ENV PYTHONUNBUFFERED=1
 COPY api/ /workspace/api/
 COPY processors/ /workspace/processors/
 COPY services/ /workspace/services/
+COPY database/ /workspace/database/
+COPY utils/ /workspace/utils/
 COPY docs/ /workspace/docs/
+COPY main.py /workspace/
 COPY start.py /workspace/
 COPY __init__.py /workspace/
+COPY requirements.txt /workspace/
 
 # 创建必要的目录
 RUN mkdir -p /workspace/output \
@@ -23,13 +27,26 @@ RUN mkdir -p /workspace/output \
     && mkdir -p /workspace/test
 
 # 安装必要的Python包（基础镜像已有大部分依赖）
-RUN pip install --no-cache-dir \
-    fastapi==0.104.1 \
-    uvicorn[standard]==0.24.0 \
-    aiofiles==23.2.1 \
-    python-multipart==0.0.6 \
-    python-dotenv==1.0.0 \
-    aiohttp
+RUN pip install --no-cache-dir -r /workspace/requirements.txt -i https://mirrors.cloud.tencent.com/pypi/simple
+
+# 创建.env文件
+RUN echo "# S3/MinIO配置" > /workspace/.env && \
+    echo "# S3/MinIO Configuration" >> /workspace/.env && \
+    echo "" >> /workspace/.env && \
+    echo "# 下载服务配置（用于从S3/MinIO下载文件）" >> /workspace/.env && \
+    echo "# Download service configuration (for downloading files from S3/MinIO)" >> /workspace/.env && \
+    echo "AWS_ACCESS_KEY_ID=test" >> /workspace/.env && \
+    echo "AWS_SECRET_ACCESS_KEY=Ab123456" >> /workspace/.env && \
+    echo "S3_ENDPOINT_URL=http://shenben.club:9000" >> /workspace/.env && \
+    echo "AWS_REGION=us-east-1" >> /workspace/.env && \
+    echo "S3_ENABLED=true" >> /workspace/.env && \
+    echo "" >> /workspace/.env && \
+    echo "# 上传服务配置（用于将文件上传到S3/MinIO）" >> /workspace/.env && \
+    echo "# Upload service configuration (for uploading files to S3/MinIO)" >> /workspace/.env && \
+    echo "UPLOAD_S3_ACCESS_KEY_ID=test" >> /workspace/.env && \
+    echo "UPLOAD_S3_SECRET_ACCESS_KEY=Ab123456" >> /workspace/.env && \
+    echo "UPLOAD_S3_ENDPOINT_URL=http://shenben.club:9000" >> /workspace/.env && \
+    echo "UPLOAD_S3_BUCKET=ai-file" >> /workspace/.env
 
 # 健康检查
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
@@ -39,7 +56,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 EXPOSE 8000
 
 # 设置启动命令
-CMD ["python", "/workspace/start.py"]
+CMD ["python", "/workspace/main.py"]
 
 # 添加标签
 LABEL maintainer="AI Education Lab"

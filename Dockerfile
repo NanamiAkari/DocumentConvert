@@ -21,15 +21,18 @@ COPY start.py /workspace/
 COPY __init__.py /workspace/
 COPY requirements.txt /workspace/
 
-# 创建必要的目录
+# 创建必要的目录和数据持久化目录
 RUN mkdir -p /workspace/output \
     && mkdir -p /workspace/task_workspace \
     && mkdir -p /workspace/temp \
-    && mkdir -p /workspace/test
+    && mkdir -p /workspace/test \
+    && mkdir -p /data/database \
+    && mkdir -p /data/logs \
+    && mkdir -p /data/workspace \
+    && mkdir -p /data/temp
 
 # 激活虚拟环境并安装必要的Python包
-RUN /opt/mineru_venv/bin/pip install --no-cache-dir sqlalchemy==2.0.23 -i https://mirrors.cloud.tencent.com/pypi/simple && \
-    /opt/mineru_venv/bin/pip install --no-cache-dir -r /workspace/requirements.txt -i https://mirrors.cloud.tencent.com/pypi/simple
+RUN /opt/mineru_venv/bin/pip install --no-cache-dir -r /workspace/requirements.txt -i https://mirrors.cloud.tencent.com/pypi/simple
 
 # 创建.env文件
 RUN echo "# S3/MinIO配置" > /workspace/.env && \
@@ -56,6 +59,9 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 
 # 暴露端口
 EXPOSE 8000
+
+# 声明数据卷
+VOLUME ["/data/database", "/data/logs", "/data/workspace", "/data/temp"]
 
 # 设置启动命令
 CMD ["/opt/mineru_venv/bin/python", "/workspace/main.py"]

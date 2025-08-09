@@ -1,16 +1,38 @@
-# 文档转换调度系统 (Document Scheduler)
+# 文档转换调度系统 (Document Conversion Service)
 
-基于 FastAPI 和 MinerU 2.0 的智能文档转换调度系统，支持 Office 文档转 PDF、PDF 转 Markdown 和图片转 Markdown 的异步任务处理。
+基于 FastAPI 和 MinerU 2.0 的智能文档转换调度系统，支持 Office 文档转 PDF、PDF 转 Markdown 的异步任务处理，并自动上传到S3存储。
 
-## 📊 测试验证结果
+## 🚀 快速启动
 
-✅ **已完成全面测试验证**
-- 测试文件：9个不同格式文档（Word、Excel、PowerPoint、PDF）
-- 转换成功率：**100%**
-- 系统稳定性：无崩溃、无异常
-- 转换质量：文本准确、格式保持、中文支持完善
+### Docker 部署（推荐）
 
-详细测试报告：[批量转换测试总结](docs/batch_conversion_test_summary.md)
+```bash
+# 拉取镜像
+docker pull docker.cnb.cool/l8ai/document/fileconvert:latest
+
+# 启动服务（带数据持久化）
+docker run -d \
+  --name fileconvert \
+  --gpus all \
+  -p 8000:8000 \
+  -v /data/database:/data/database \
+  -v /data/logs:/data/logs \
+  -v /data/workspace:/data/workspace \
+  -v /data/temp:/data/temp \
+  docker.cnb.cool/l8ai/document/fileconvert:latest
+
+# 健康检查
+curl http://localhost:8000/health
+```
+
+### 数据持久化目录说明
+
+| 目录 | 用途 | 说明 |
+|------|------|------|
+| `/data/database` | 数据库文件 | SQLite数据库文件存储 |
+| `/data/logs` | 日志文件 | 应用日志和错误日志 |
+| `/data/workspace` | 任务工作空间 | 任务处理临时文件 |
+| `/data/temp` | 临时文件 | 文件上传和处理缓存 |
 
 ## 🌟 功能特性
 
@@ -134,114 +156,161 @@ docker logs mineru-api
 curl http://localhost:8000/health
 ```
 
-## 📋 使用示例
+## 📋 API 使用指南
 
-### 创建转换任务
+### 1. 创建Office转PDF任务
 
-#### Office转PDF
-```bash
-curl -X POST http://localhost:8000/api/tasks \
-  -H "Content-Type: application/json" \
-  -d '{
-    "task_type": "office_to_pdf",
-    "input_path": "/workspace/test/document.docx",
-    "output_path": "/workspace/output/document.pdf",
-    "priority": "normal"
-  }'
-```
-
-#### PDF转Markdown
-```bash
-curl -X POST http://localhost:8000/api/tasks \
-  -H "Content-Type: application/json" \
-  -d '{
-    "task_type": "pdf_to_markdown",
-    "input_path": "/workspace/test/document.pdf",
-    "output_path": "/workspace/output/document.md",
-    "priority": "normal",
-    "params": {"force_reprocess": true}
-  }'
-```
-
-#### 批量Office转Markdown (推荐)
-```bash
-curl -X POST http://localhost:8000/api/tasks \
-  -H "Content-Type: application/json" \
-  -d '{
-    "task_type": "batch_office_to_markdown",
-    "input_path": "/workspace/test",
-    "output_path": "/workspace/output/markdown",
-    "priority": "normal",
-    "params": {"recursive": false, "force_reprocess": true}
-  }'
-```
-
-#### 图片转Markdown (OCR识别) ✨ **新增**
 ```bash
 curl -X POST "http://localhost:8000/api/tasks/create" \
-  -F "task_type=image_to_markdown" \
+  -F "task_type=office_to_pdf" \
+  -F "input_path=/path/to/document.docx" \
   -F "bucket_name=your-bucket" \
-  -F "file_path=path/to/image.png" \
+  -F "file_path=documents/document.docx" \
   -F "platform=your-platform" \
-  -F "priority=normal"
+  -F "priority=high"
 ```
 
-#### 批量图片转Markdown ✨ **新增**
+**参数说明:**
+- `task_type`: 固定值 `office_to_pdf`
+- `input_path`: 本地文件路径
+- `bucket_name`: S3存储桶名称（任意bucket名称）
+- `file_path`: 文件在bucket中的路径
+- `platform`: 平台标识（任意值）
+- `priority`: 优先级 (`high`, `normal`, `low`)
+
+### 2. 创建PDF转Markdown任务
+
 ```bash
 curl -X POST "http://localhost:8000/api/tasks/create" \
-  -F "task_type=batch_image_to_markdown" \
+  -F "task_type=pdf_to_markdown" \
+  -F "input_path=/path/to/document.pdf" \
   -F "bucket_name=your-bucket" \
-  -F "file_path=path/to/images/" \
+  -F "file_path=documents/document.pdf" \
   -F "platform=your-platform" \
-  -F "priority=normal"
+  -F "priority=high"
 ```
 
-### 任务重试功能 ✨ **新增**
+**参数说明:**
+- `task_type`: 固定值 `pdf_to_markdown`
+- 其他参数同上
 
-#### 重试单个任务
+### 3. 根据bucket+file_path查询任务处理结果
+
 ```bash
-curl -X POST "http://localhost:8000/api/tasks/1/retry"
+curl -X GET "http://localhost:8000/api/tasks/search?bucket_name=your-bucket&file_path=documents/document.pdf"
 ```
 
-#### 批量重试失败任务
+**响应示例:**
+```json
+{
+  "tasks": [
+    {
+      "id": 1,
+      "task_type": "pdf_to_markdown",
+      "status": "completed",
+      "bucket_name": "your-bucket",
+      "file_path": "documents/document.pdf",
+      "s3_urls": [
+        "s3://ai-file/your-bucket/documents/document/markdown/document.md",
+        "s3://ai-file/your-bucket/documents/document/markdown/document.json"
+      ],
+      "output_url": "s3://ai-file/your-bucket/documents/document/markdown/document.md",
+      "created_at": "2025-08-09T12:00:00Z",
+      "completed_at": "2025-08-09T12:05:00Z"
+    }
+  ]
+}
+```
+
+### 4. 获取ai-file的S3路径格式
+
+**路径规则:** `ai-file/{bucket_name}/{文件夹路径}/{文件名(无后缀)}/{类型}/{输出文件}`
+
+**示例:**
+- 输入文件: `documents/report.pdf`
+- Bucket: `company-docs`
+- 任务类型: `pdf_to_markdown`
+- 输出路径: `s3://ai-file/company-docs/documents/report/markdown/report.md`
+
+**路径组成:**
+- `ai-file`: 固定的S3存储桶前缀
+- `{bucket_name}`: 用户指定的bucket名称
+- `{文件夹路径}`: 从file_path提取的目录路径
+- `{文件名(无后缀)}`: 原始文件名去掉扩展名
+- `{类型}`: 根据任务类型确定 (`pdf` 或 `markdown`)
+- `{输出文件}`: 转换后的文件名
+
+### 5. 查看任务状态
+
+#### 查看特定任务详情
 ```bash
-curl -X POST "http://localhost:8000/api/tasks/retry-failed"
+curl -X GET "http://localhost:8000/api/tasks/1"
 ```
 
-#### 修改任务类型
+**响应示例:**
+```json
+{
+  "id": 1,
+  "task_type": "pdf_to_markdown",
+  "status": "completed",
+  "progress": 100,
+  "bucket_name": "your-bucket",
+  "file_path": "documents/document.pdf",
+  "platform": "your-platform",
+  "priority": "high",
+  "s3_urls": [
+    "s3://ai-file/your-bucket/documents/document/markdown/document.md",
+    "s3://ai-file/your-bucket/documents/document/markdown/document.json"
+  ],
+  "output_url": "s3://ai-file/your-bucket/documents/document/markdown/document.md",
+  "task_processing_time": 45.67,
+  "created_at": "2025-08-09T12:00:00Z",
+  "started_at": "2025-08-09T12:01:00Z",
+  "completed_at": "2025-08-09T12:05:00Z",
+  "error_message": null
+}
+```
+
+#### 查看所有任务
 ```bash
-curl -X PUT "http://localhost:8000/api/tasks/1/task-type" \
-  -F "new_task_type=image_to_markdown"
+curl -X GET "http://localhost:8000/api/tasks?limit=10&offset=0&status=completed"
 ```
 
-### 查看任务状态
+#### 查看系统统计
 ```bash
-# 查看特定任务状态
-curl http://localhost:8000/api/tasks/1
-
-# 查看队列统计
-curl http://localhost:8000/api/stats
-
-# 查看所有任务
-curl http://localhost:8000/api/tasks
+curl -X GET "http://localhost:8000/api/stats"
 ```
 
-## API接口
+## 📚 API接口文档
 
 ### 核心接口
-- `POST /api/tasks` - 创建转换任务
-- `GET /api/tasks/{task_id}` - 查看任务状态
-- `GET /api/tasks` - 列出所有任务
-- `GET /api/stats` - 查看队列统计
-- `GET /health` - 健康检查
 
-### 便捷接口
-- `GET /api/shortcuts/office-to-pdf` - 直接创建Office转PDF任务
-- `GET /api/shortcuts/pdf-to-markdown` - 直接创建PDF转Markdown任务
-- `GET /api/shortcuts/office-to-markdown` - 直接创建Office转Markdown任务
-- `GET /api/shortcuts/batch-office-to-pdf` - 批量Office转PDF
-- `GET /api/shortcuts/batch-pdf-to-markdown` - 批量PDF转Markdown
-- `GET /api/shortcuts/batch-office-to-markdown` - 批量Office转Markdown (推荐)
+| 方法 | 路径 | 功能 | 说明 |
+|------|------|------|------|
+| `POST` | `/api/tasks/create` | 创建转换任务 | 支持office_to_pdf和pdf_to_markdown |
+| `GET` | `/api/tasks/{task_id}` | 查看任务状态 | 获取任务详细信息和处理结果 |
+| `GET` | `/api/tasks` | 列出所有任务 | 支持分页和状态过滤 |
+| `GET` | `/api/tasks/search` | 搜索任务 | 根据bucket_name和file_path查询 |
+| `GET` | `/api/stats` | 查看系统统计 | 队列状态和任务统计信息 |
+| `GET` | `/health` | 健康检查 | 服务状态和组件健康状态 |
+| `GET` | `/docs` | API文档 | Swagger交互式文档 |
+
+### 任务类型说明
+
+| 任务类型 | 输入格式 | 输出格式 | S3路径类型 |
+|----------|----------|----------|------------|
+| `office_to_pdf` | .docx, .xlsx, .pptx | .pdf | `pdf` |
+| `pdf_to_markdown` | .pdf | .md, .json | `markdown` |
+
+### S3存储路径规则
+
+**格式:** `s3://ai-file/{bucket_name}/{文件夹路径}/{文件名(无后缀)}/{类型}/{输出文件}`
+
+**示例:**
+```
+输入: bucket_name=company, file_path=docs/report.pdf
+输出: s3://ai-file/company/docs/report/markdown/report.md
+```
 
 ## ⚙️ 配置说明
 

@@ -580,22 +580,28 @@ class EnhancedTaskProcessor:
                     if len(file_path_parts) > 1:
                         original_folder = '/'.join(file_path_parts[:-1])
                     original_filename = file_path_parts[-1]
+                elif task.bucket_name and task.file_path:
+                    # 使用任务中的bucket_name和file_path
+                    original_bucket = task.bucket_name
+                    original_filename = Path(task.file_path).name
+                    # 从file_path提取文件夹路径
+                    file_path_parts = task.file_path.split('/')
+                    if len(file_path_parts) > 1:
+                        original_folder = '/'.join(file_path_parts[:-1])
+                    else:
+                        original_folder = ""
                 elif task.platform and task.input_path:
-                    # 根据平台设置bucket和folder
+                    # 后备方案：根据平台设置bucket和folder
                     original_filename = Path(task.input_path).name
-                    if task.platform == "gaojiaqi":
-                        original_bucket = "gaojiaqi"
-                        # 使用文件所在的目录路径作为folder
-                        input_path = Path(task.input_path)
-                        if len(input_path.parts) > 1:
-                            # 提取相对于某个基础路径的文件夹路径
-                            original_folder = str(input_path.parent).replace('/workspace/', '').replace('/workspace', '')
-                        else:
-                            original_folder = "documents"
-                    elif task.platform == "local":
-                        original_bucket = "local"
-                        original_folder = "uploads"
-                    # 可以根据需要添加更多平台
+                    # 使用bucket_name如果有的话，否则使用platform作为bucket
+                    original_bucket = task.bucket_name if task.bucket_name else task.platform
+                    # 使用文件所在的目录路径作为folder
+                    input_path = Path(task.input_path)
+                    if len(input_path.parts) > 1:
+                        # 提取相对于某个基础路径的文件夹路径
+                        original_folder = str(input_path.parent).replace('/workspace/', '').replace('/workspace', '')
+                    else:
+                        original_folder = "documents"
                 elif task.input_path:
                     # 从本地路径提取文件名
                     original_filename = Path(task.input_path).name

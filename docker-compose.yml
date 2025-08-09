@@ -1,0 +1,64 @@
+version: '3.8'
+
+services:
+  document-converter:
+    image: docker.cnb.cool/l8ai/document/documentconvert:latest
+    container_name: document-converter
+    ports:
+      - "8000:8000"
+    volumes:
+      # 数据持久化目录
+      - ./data/database:/app/database
+      - ./data/logs:/app/log_files
+      - ./data/workspace:/app/task_workspace
+      - ./data/temp:/app/temp_files
+    environment:
+      # S3/MinIO配置 (必需)
+      - S3_ENDPOINT=http://your-minio-server:9000
+      - S3_ACCESS_KEY=your-access-key
+      - S3_SECRET_KEY=your-secret-key
+      - S3_REGION=us-east-1
+      
+      # 数据库配置 (可选)
+      - DATABASE_TYPE=sqlite
+      - DATABASE_URL=sqlite:///./database/document_conversion.db
+      
+      # 服务配置 (可选)
+      - LOG_LEVEL=INFO
+      - MAX_CONCURRENT_TASKS=3
+      
+      # GPU配置 (可选)
+      - CUDA_VISIBLE_DEVICES=0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # 可选: MinIO服务 (如果需要本地S3存储)
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - ./data/minio:/data
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    command: server /data --console-address ":9001"
+    restart: unless-stopped
+
+networks:
+  default:
+    name: document-converter-network

@@ -34,11 +34,11 @@ mkdir -p ./data/{database,logs,workspace}
 # 运行容器
 docker run -d \
   --name document-converter \
-  -p 8000:8000 \
+  -p 33081:8000 \
   --gpus all \
   -v /raid5/data/document-convert/database:/app/database \
-  -v $(pwd)/data/logs:/app/log_files \
-  -v $(pwd)/data/workspace:/app/task_workspace \
+  -v /raid5/data/document-convert/logs:/app/log_files \
+  -v /raid5/data/document-convert/workspace:/app/task_workspace \
   -e S3_ENDPOINT=http://your-minio-server:9000 \
   -e S3_ACCESS_KEY=your-access-key \
   -e S3_SECRET_KEY=your-secret-key \

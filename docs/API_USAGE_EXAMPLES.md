@@ -66,11 +66,10 @@ curl -s http://localhost:8000/health
 将PDF文件转换为Markdown格式，同时提取图片和结构化数据。
 
 ```bash
-curl -X POST "http://localhost:8000/api/tasks/create" \
+curl -X POST "http://localhost:33081/api/tasks/create" \
   -F "task_type=pdf_to_markdown" \
-  -F "bucket_name=documents" \
-  -F "file_path=reports/annual_report.pdf" \
-  -F "platform=your-platform" \
+  -F "bucket_name=gaojiaqi" \
+  -F "file_path=Gemini for Google Workspace 提示指南 101（Gemini 工作区提示指南 101）.pdf" \
   -F "priority=high"
 ```
 

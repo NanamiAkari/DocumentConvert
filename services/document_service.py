@@ -326,6 +326,9 @@ class DocumentService:
             error_str = str(e)
             error_analysis = self._analyze_mineru_python_error(error_str, traceback.format_exc())
 
+            # 根据错误类型生成建议
+            suggestions = self._get_error_suggestions(error_analysis)
+
             # 创建详细错误信息的markdown文件
             md_content = f"""# PDF转换错误 (MinerU 2.0 Python API)
 
@@ -350,10 +353,7 @@ class DocumentService:
 
 ## 建议解决方案
 
-1. 检查GPU内存是否足够
-2. 检查CUDA和PyTorch是否正确安装
-3. 检查PDF文件是否损坏或格式不支持
-4. 尝试重启Python进程释放资源
+{suggestions}
 """
 
             with open(output_file, 'w', encoding='utf-8') as f:
@@ -381,7 +381,10 @@ class DocumentService:
         """分析MinerU Python API错误信息"""
         full_error = error_str + " " + traceback_str
 
-        if "CUDA out of memory" in full_error or "OutOfMemoryError" in full_error:
+        # 检查PDF密码保护错误
+        if "Incorrect password error" in full_error or "PdfiumError" in full_error:
+            return "PDF密码保护错误 - 该PDF文件受密码保护，无法处理。请提供无密码保护的PDF文件"
+        elif "CUDA out of memory" in full_error or "OutOfMemoryError" in full_error:
             return "GPU内存不足错误 - 需要释放GPU内存或使用更小的batch size"
         elif "No module named" in full_error:
             return "Python模块缺失错误 - 检查MinerU及其依赖是否正确安装"
@@ -405,6 +408,45 @@ class DocumentService:
             return f"未知错误 - {error_str[:200]}..."
         else:
             return "无具体错误信息，可能是静默失败"
+
+    def _get_error_suggestions(self, error_analysis: str) -> str:
+        """根据错误分析生成建议解决方案"""
+        if "PDF密码保护错误" in error_analysis:
+            return """1. 该PDF文件受密码保护，无法自动处理
+2. 请使用PDF编辑软件移除密码保护后重新上传
+3. 或者提供无密码保护的PDF文件版本
+4. 如需保持文档安全性，建议在转换完成后重新加密"""
+        elif "GPU内存不足错误" in error_analysis:
+            return """1. 检查GPU内存使用情况
+2. 尝试重启服务释放GPU内存
+3. 减小PDF文件大小或分页处理
+4. 检查是否有其他进程占用GPU"""
+        elif "CUDA不可用错误" in error_analysis:
+            return """1. 检查CUDA驱动是否正确安装
+2. 检查PyTorch是否支持当前CUDA版本
+3. 验证GPU设备是否可用
+4. 重启服务或重新安装CUDA环境"""
+        elif "Python模块缺失错误" in error_analysis or "导入错误" in error_analysis:
+            return """1. 检查MinerU及其依赖是否完整安装
+2. 重新安装相关Python包
+3. 检查虚拟环境配置
+4. 验证包版本兼容性"""
+        elif "权限错误" in error_analysis:
+            return """1. 检查文件和目录的读写权限
+2. 确保服务有足够的文件系统权限
+3. 检查文件是否被其他进程占用
+4. 尝试以管理员权限运行"""
+        elif "文件未找到错误" in error_analysis:
+            return """1. 检查输入文件路径是否正确
+2. 确认文件确实存在
+3. 检查文件是否已被移动或删除
+4. 验证文件路径中的特殊字符"""
+        else:
+            return """1. 检查GPU内存是否足够
+2. 检查CUDA和PyTorch是否正确安装
+3. 检查PDF文件是否损坏或格式不支持
+4. 尝试重启Python进程释放资源
+5. 如问题持续，请联系技术支持"""
 
     def _clear_gpu_memory(self):
         """清理GPU内存"""

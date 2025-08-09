@@ -340,9 +340,9 @@ class S3UploadService:
             filename = original_filename or local_file.name
 
             # 按照要求的路径规则构建：{original_bucket}/{原来文件的文件夹路径+文件名(去掉后缀)}/{类型(pdf/markdown)}/{filename}
-            if original_bucket and original_folder and original_filename:
+            if original_bucket and original_filename:
                 # 清理文件夹路径，移除开头和结尾的斜杠
-                folder_path = original_folder.strip('/')
+                folder_path = (original_folder or "").strip('/')
                 # 获取原始文件名（去掉后缀）
                 original_name_without_ext = Path(original_filename).stem
                 # 根据任务类型确定类型目录
@@ -354,7 +354,10 @@ class S3UploadService:
                     type_dir = "converted"
 
                 # 构建路径：{original_bucket}/{文件夹路径+原始文件名(无后缀)}/{类型}/{filename}
-                s3_key = f"{original_bucket}/{folder_path}/{original_name_without_ext}/{type_dir}/{filename}"
+                if folder_path:
+                    s3_key = f"{original_bucket}/{folder_path}/{original_name_without_ext}/{type_dir}/{filename}"
+                else:
+                    s3_key = f"{original_bucket}/{original_name_without_ext}/{type_dir}/{filename}"
             else:
                 # 使用原有的converted/{task_id}结构作为后备
                 s3_key = f"converted/{task_id}/{filename}"
@@ -423,8 +426,8 @@ class S3UploadService:
                 raise ValueError(f"Output directory not found: {output_dir_path}")
 
             # 构建S3前缀路径 - 使用统一的路径规则
-            if original_bucket and original_folder and original_filename:
-                folder_path = original_folder.strip('/')
+            if original_bucket and original_filename:
+                folder_path = (original_folder or "").strip('/')
                 # 获取原始文件名（去掉后缀）
                 original_name_without_ext = Path(original_filename).stem
                 # 根据任务类型确定类型目录
@@ -436,7 +439,10 @@ class S3UploadService:
                     type_dir = "converted"
 
                 # 构建前缀路径：{original_bucket}/{文件夹路径+原始文件名(无后缀)}/{类型}
-                s3_prefix = f"{original_bucket}/{folder_path}/{original_name_without_ext}/{type_dir}"
+                if folder_path:
+                    s3_prefix = f"{original_bucket}/{folder_path}/{original_name_without_ext}/{type_dir}"
+                else:
+                    s3_prefix = f"{original_bucket}/{original_name_without_ext}/{type_dir}"
             else:
                 s3_prefix = f"converted/{task_id}"
 

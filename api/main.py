@@ -217,7 +217,7 @@ async def list_tasks(status: Optional[str] = None, limit: int = 100):
     tasks = []
     for task in task_processor.tasks.values():
         if status is None or task.status == status:
-            tasks.append(task_processor.get_task_status(task.task_id))
+            tasks.append(task_processor.get_task_status(task.id))
     
     # 限制返回数量
     tasks = tasks[:limit]

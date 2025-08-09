@@ -574,22 +574,41 @@ class EnhancedTaskProcessor:
                 original_filename = None
 
                 if task.bucket_name and task.file_path:
-                    original_bucket = task.bucket_name
-                    # 从file_path中提取文件夹路径和文件名
-                    file_path_parts = task.file_path.split('/')
-                    if len(file_path_parts) > 1:
-                        original_folder = '/'.join(file_path_parts[:-1])
-                    original_filename = file_path_parts[-1]
-                elif task.bucket_name and task.file_path:
-                    # 使用任务中的bucket_name和file_path
-                    original_bucket = task.bucket_name
-                    original_filename = Path(task.file_path).name
-                    # 从file_path提取文件夹路径
-                    file_path_parts = task.file_path.split('/')
-                    if len(file_path_parts) > 1:
-                        original_folder = '/'.join(file_path_parts[:-1])
+                    # 特殊处理：如果bucket是ai-file且路径包含pdf/markdown结构，需要解析出原始信息
+                    if task.bucket_name == "ai-file" and ("/pdf/" in task.file_path or "/markdown/" in task.file_path):
+                        # 解析ai-file路径：{original_bucket}/{original_name}/{type}/{filename}
+                        # 例如：test/杭电申报-428定/pdf/杭电申报-428定.pdf
+                        path_parts = task.file_path.split('/')
+                        logger.info(f"[Task {task.id}] Parsing ai-file path: {task.file_path}, parts: {path_parts}")
+                        if len(path_parts) >= 4 and (path_parts[2] == "pdf" or path_parts[2] == "markdown"):
+                            original_bucket = path_parts[0]  # 真正的原始bucket: test
+                            original_name = path_parts[1]    # 原始文件名(无后缀): 杭电申报-428定
+                            # 对于PDF转Markdown，我们需要使用原始的doc文件名作为original_filename
+                            if task.task_type == "pdf_to_markdown":
+                                original_filename = f"{original_name}.doc"  # 假设原始文件是doc
+                            else:
+                                original_filename = Path(task.file_path).name  # 保持当前文件名
+                            original_folder = ""  # 根目录
+                            logger.info(f"[Task {task.id}] Parsed: bucket={original_bucket}, name={original_name}, filename={original_filename}")
+                        else:
+                            # 如果路径格式不符合预期，使用默认处理
+                            original_bucket = task.bucket_name
+                            original_filename = Path(task.file_path).name
+                            file_path_parts = task.file_path.split('/')
+                            if len(file_path_parts) > 1:
+                                original_folder = '/'.join(file_path_parts[:-1])
+                            else:
+                                original_folder = ""
                     else:
-                        original_folder = ""
+                        # 普通处理
+                        original_bucket = task.bucket_name
+                        original_filename = Path(task.file_path).name
+                        # 从file_path提取文件夹路径
+                        file_path_parts = task.file_path.split('/')
+                        if len(file_path_parts) > 1:
+                            original_folder = '/'.join(file_path_parts[:-1])
+                        else:
+                            original_folder = ""
                 elif task.platform and task.input_path:
                     # 后备方案：根据平台设置bucket和folder
                     original_filename = Path(task.input_path).name
@@ -602,8 +621,8 @@ class EnhancedTaskProcessor:
                         original_folder = str(input_path.parent).replace('/workspace/', '').replace('/workspace', '')
                     else:
                         original_folder = "documents"
-                elif task.input_path:
-                    # 从本地路径提取文件名
+                elif task.input_path and not original_filename:
+                    # 从本地路径提取文件名（仅当之前没有解析出original_filename时）
                     original_filename = Path(task.input_path).name
 
                 # 上传完整的转换结果
@@ -647,21 +666,27 @@ class EnhancedTaskProcessor:
                     file_path_parts = task.file_path.split('/')
                     if len(file_path_parts) > 1:
                         original_folder = '/'.join(file_path_parts[:-1])  # 除了文件名的所有部分
+                elif task.bucket_name and task.file_path:
+                    # 使用任务中的bucket_name和file_path
+                    original_bucket = task.bucket_name
+                    original_filename = Path(task.file_path).name
+                    # 从file_path提取文件夹路径
+                    file_path_parts = task.file_path.split('/')
+                    if len(file_path_parts) > 1:
+                        original_folder = '/'.join(file_path_parts[:-1])
+                    else:
+                        original_folder = ""
                 elif task.platform and task.input_path:
-                    # 根据平台设置bucket和folder
-                    if task.platform == "gaojiaqi":
-                        original_bucket = "gaojiaqi"
-                        # 使用文件所在的目录路径作为folder
-                        input_path = Path(task.input_path)
-                        if len(input_path.parts) > 1:
-                            # 提取相对于某个基础路径的文件夹路径
-                            original_folder = str(input_path.parent).replace('/workspace/', '').replace('/workspace', '')
-                        else:
-                            original_folder = "documents"
-                    elif task.platform == "local":
-                        original_bucket = "local"
-                        original_folder = "uploads"
-                    # 可以根据需要添加更多平台
+                    # 后备方案：根据平台设置bucket和folder
+                    # 使用bucket_name如果有的话，否则使用platform作为bucket
+                    original_bucket = task.bucket_name if task.bucket_name else task.platform
+                    # 使用文件所在的目录路径作为folder
+                    input_path = Path(task.input_path)
+                    if len(input_path.parts) > 1:
+                        # 提取相对于某个基础路径的文件夹路径
+                        original_folder = str(input_path.parent).replace('/workspace/', '').replace('/workspace', '')
+                    else:
+                        original_folder = "documents"
 
                 # 上传到ai-file存储桶，遵循Media-Convert路径规则
                 result = await self.s3_upload_service.upload_converted_document(

@@ -461,10 +461,11 @@ class S3UploadService:
                 'upload-type': 'complete-conversion-result'
             }
 
-            # 上传整个目录
+            # 上传整个目录 - 始终使用ai-file作为目标bucket
             result = await self.upload_directory(
                 local_dir_path=str(output_dir),
                 s3_prefix=s3_prefix,
+                bucket_name="ai-file",
                 metadata=metadata
             )
 

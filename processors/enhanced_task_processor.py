@@ -464,22 +464,38 @@ class EnhancedTaskProcessor:
                     # 确保input目录存在
                     workspace_input_path.parent.mkdir(parents=True, exist_ok=True)
 
-                    # 复制文件
-                    import shutil
-                    shutil.copy2(str(input_path), str(workspace_input_path))
+                    # 检查源文件和目标文件是否相同
+                    if input_path.resolve() == workspace_input_path.resolve():
+                        # 如果源文件和目标文件相同，直接使用原文件
+                        task_logger.log_file_operation("local_file_direct", str(input_path), True,
+                                                     f"Using file directly (same path), Size: {input_path.stat().st_size} bytes")
+                        
+                        # 更新任务信息
+                        await self.db_manager.update_task(
+                            task.id,
+                            input_path=str(input_path),
+                            file_name=filename,
+                            file_size_bytes=input_path.stat().st_size
+                        )
+                        
+                        return input_path
+                    else:
+                        # 复制文件
+                        import shutil
+                        shutil.copy2(str(input_path), str(workspace_input_path))
 
-                    task_logger.log_file_operation("local_file_copy", f"{input_path} -> {workspace_input_path}", True,
-                                                 f"Size: {workspace_input_path.stat().st_size} bytes")
+                        task_logger.log_file_operation("local_file_copy", f"{input_path} -> {workspace_input_path}", True,
+                                                     f"Size: {workspace_input_path.stat().st_size} bytes")
 
-                    # 更新任务信息
-                    await self.db_manager.update_task(
-                        task.id,
-                        input_path=str(workspace_input_path),
-                        file_name=filename,
-                        file_size_bytes=workspace_input_path.stat().st_size
-                    )
+                        # 更新任务信息
+                        await self.db_manager.update_task(
+                            task.id,
+                            input_path=str(workspace_input_path),
+                            file_name=filename,
+                            file_size_bytes=workspace_input_path.stat().st_size
+                        )
 
-                    return workspace_input_path
+                        return workspace_input_path
                 else:
                     task_logger.log_file_operation("local_file_access", str(input_path), False, "File not found")
                     return None

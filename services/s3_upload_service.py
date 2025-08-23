@@ -27,12 +27,39 @@ class S3UploadService:
     def _get_default_upload_config(self) -> Dict[str, Any]:
         """获取默认上传配置"""
         # 从环境变量获取上传S3配置，如果不存在则回退到通用S3配置
+        # 兼容多种常见命名：
+        # - UPLOAD_S3_* 优先生效（上传独立配置）
+        # - S3_*_ID / S3_* / AWS_* / MINIO_*
         return {
-            "aws_access_key_id": os.getenv("UPLOAD_S3_ACCESS_KEY_ID") or os.getenv("S3_ACCESS_KEY_ID") or os.getenv("AWS_ACCESS_KEY_ID"),
-            "aws_secret_access_key": os.getenv("UPLOAD_S3_SECRET_ACCESS_KEY") or os.getenv("S3_SECRET_ACCESS_KEY") or os.getenv("AWS_SECRET_ACCESS_KEY"),
-            "s3_endpoint_url": os.getenv("UPLOAD_S3_ENDPOINT_URL") or os.getenv("S3_ENDPOINT_URL"),
+            # 访问密钥ID
+            "aws_access_key_id": (
+                os.getenv("UPLOAD_S3_ACCESS_KEY_ID")
+                or os.getenv("S3_ACCESS_KEY_ID")
+                or os.getenv("S3_ACCESS_KEY")
+                or os.getenv("AWS_ACCESS_KEY_ID")
+                or os.getenv("MINIO_ACCESS_KEY")
+                or os.getenv("MINIO_ROOT_USER")
+            ),
+            # 访问密钥
+            "aws_secret_access_key": (
+                os.getenv("UPLOAD_S3_SECRET_ACCESS_KEY")
+                or os.getenv("S3_SECRET_ACCESS_KEY")
+                or os.getenv("S3_SECRET_KEY")
+                or os.getenv("AWS_SECRET_ACCESS_KEY")
+                or os.getenv("MINIO_SECRET_KEY")
+                or os.getenv("MINIO_ROOT_PASSWORD")
+            ),
+            # 端点
+            "s3_endpoint_url": (
+                os.getenv("UPLOAD_S3_ENDPOINT_URL")
+                or os.getenv("S3_ENDPOINT_URL")
+                or os.getenv("S3_ENDPOINT")
+                or os.getenv("MINIO_ENDPOINT")
+            ),
+            # 区域
             "aws_region": os.getenv("UPLOAD_S3_REGION") or os.getenv("S3_REGION") or os.getenv("AWS_REGION", "us-east-1"),
-            "bucket_name": os.getenv("UPLOAD_S3_BUCKET", "ai-file")  # 默认上传到ai-file存储桶
+            # 存储桶
+            "bucket_name": os.getenv("UPLOAD_S3_BUCKET") or os.getenv("S3_BUCKET") or "ai-file"
         }
     
     def create_s3_client(self, config: Optional[Dict[str, Any]] = None) -> boto3.client:
@@ -265,52 +292,36 @@ class S3UploadService:
                             metadata=file_metadata
                         )
 
-                        if result['success']:
-                            uploaded_files.append({
-                                'local_path': str(file_path),
-                                'relative_path': str(relative_path),
-                                's3_key': s3_key,
-                                's3_url': result['s3_url'],
-                                'file_size': result['file_size']
-                            })
-                            total_size += result['file_size']
-                            logger.info(f"Uploaded file: {relative_path} -> {s3_key}")
+                        if result.get('success'):
+                            uploaded_files.append(result)
+                            total_size += result.get('file_size', 0)
                         else:
                             failed_files.append({
-                                'local_path': str(file_path),
-                                'relative_path': str(relative_path),
-                                's3_key': s3_key,
-                                'error': result.get('error')
+                                'file': str(file_path),
+                                'error': result.get('error', 'Unknown error')
                             })
-                            logger.error(f"Failed to upload file: {relative_path} - {result.get('error')}")
-
                     except Exception as e:
                         failed_files.append({
-                            'local_path': str(file_path),
-                            'relative_path': str(relative_path),
-                            's3_key': s3_key,
+                            'file': str(file_path),
                             'error': str(e)
                         })
-                        logger.error(f"Exception uploading file: {relative_path} - {e}")
 
             success = len(failed_files) == 0
             return {
                 'success': success,
+                'bucket': bucket_name or (s3_config or self.default_config).get('bucket_name', 'ai-file'),
+                's3_prefix': s3_prefix,
+                'uploaded_files_count': len(uploaded_files),
+                'failed_files_count': len(failed_files),
                 'uploaded_files': uploaded_files,
                 'failed_files': failed_files,
-                'total_files': len(uploaded_files) + len(failed_files),
-                'uploaded_count': len(uploaded_files),
-                'failed_count': len(failed_files),
-                'total_size': total_size,
-                's3_prefix': s3_prefix
+                'total_uploaded_size': total_size
             }
-
         except Exception as e:
-            logger.error(f"Failed to upload directory {local_dir_path}: {e}")
+            logger.error(f"Unexpected error during directory upload: {e}")
             return {
                 'success': False,
-                'error': str(e),
-                'error_type': type(e).__name__
+                'error': str(e)
             }
 
     async def upload_converted_document(self,
@@ -339,7 +350,7 @@ class S3UploadService:
             local_file = Path(local_path)
             filename = original_filename or local_file.name
 
-            # 按照要求的路径规则构建：{original_bucket}/{原来文件的文件夹路径+文件名(去掉后缀)}/{类型(pdf/markdown)}/{filename}
+            # 优化路径规则构建：避免重复的bucket名称
             if original_bucket and original_filename:
                 # 清理文件夹路径，移除开头和结尾的斜杠
                 folder_path = (original_folder or "").strip('/')
@@ -353,11 +364,20 @@ class S3UploadService:
                 else:
                     type_dir = "converted"
 
-                # 构建路径：{original_bucket}/{文件夹路径+原始文件名(无后缀)}/{类型}/{filename}
-                if folder_path:
-                    s3_key = f"{original_bucket}/{folder_path}/{original_name_without_ext}/{type_dir}/{filename}"
+                # 优化路径构建逻辑：避免重复bucket名称
+                # 如果original_bucket已经是ai-file，说明这是一个转换链，不需要再添加original_bucket前缀
+                if original_bucket == "ai-file":
+                    # 对于ai-file内部的转换，直接使用文件名结构
+                    if folder_path:
+                        s3_key = f"{folder_path}/{original_name_without_ext}/{type_dir}/{filename}"
+                    else:
+                        s3_key = f"{original_name_without_ext}/{type_dir}/{filename}"
                 else:
-                    s3_key = f"{original_bucket}/{original_name_without_ext}/{type_dir}/{filename}"
+                    # 对于外部bucket的文件，使用完整路径结构
+                    if folder_path:
+                        s3_key = f"{original_bucket}/{folder_path}/{original_name_without_ext}/{type_dir}/{filename}"
+                    else:
+                        s3_key = f"{original_bucket}/{original_name_without_ext}/{type_dir}/{filename}"
             else:
                 # 使用原有的converted/{task_id}结构作为后备
                 s3_key = f"converted/{task_id}/{filename}"
@@ -425,7 +445,7 @@ class S3UploadService:
             if not output_dir.exists() or not output_dir.is_dir():
                 raise ValueError(f"Output directory not found: {output_dir_path}")
 
-            # 构建S3前缀路径 - 使用统一的路径规则
+            # 构建S3前缀路径 - 使用优化的路径规则，避免重复bucket名称
             if original_bucket and original_filename:
                 folder_path = (original_folder or "").strip('/')
                 # 获取原始文件名（去掉后缀）
@@ -438,11 +458,20 @@ class S3UploadService:
                 else:
                     type_dir = "converted"
 
-                # 构建前缀路径：{original_bucket}/{文件夹路径+原始文件名(无后缀)}/{类型}
-                if folder_path:
-                    s3_prefix = f"{original_bucket}/{folder_path}/{original_name_without_ext}/{type_dir}"
+                # 优化路径构建逻辑：避免重复bucket名称
+                # 如果original_bucket已经是ai-file，说明这是一个转换链，不需要再添加original_bucket前缀
+                if original_bucket == "ai-file":
+                    # 对于ai-file内部的转换，直接使用文件名结构
+                    if folder_path:
+                        s3_prefix = f"{folder_path}/{original_name_without_ext}/{type_dir}"
+                    else:
+                        s3_prefix = f"{original_name_without_ext}/{type_dir}"
                 else:
-                    s3_prefix = f"{original_bucket}/{original_name_without_ext}/{type_dir}"
+                    # 对于外部bucket的文件，使用完整路径结构
+                    if folder_path:
+                        s3_prefix = f"{original_bucket}/{folder_path}/{original_name_without_ext}/{type_dir}"
+                    else:
+                        s3_prefix = f"{original_bucket}/{original_name_without_ext}/{type_dir}"
             else:
                 s3_prefix = f"converted/{task_id}"
 

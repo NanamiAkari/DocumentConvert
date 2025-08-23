@@ -26,13 +26,38 @@ class S3DownloadService:
         self.default_config = self._get_default_download_config()
     
     def _get_default_download_config(self) -> Dict[str, Any]:
-        """获取默认下载配置"""
+        """获取默认下载配置（兼容多种环境变量命名）"""
         return {
-            "aws_access_key_id": os.getenv("S3_ACCESS_KEY_ID") or os.getenv("AWS_ACCESS_KEY_ID"),
-            "aws_secret_access_key": os.getenv("S3_SECRET_ACCESS_KEY") or os.getenv("AWS_SECRET_ACCESS_KEY"),
-            "s3_endpoint_url": os.getenv("S3_ENDPOINT_URL"),
+            # 访问密钥ID：优先使用下载/通用S3命名，再兼容AWS与MinIO常见命名
+            "aws_access_key_id": (
+                os.getenv("S3_ACCESS_KEY_ID")
+                or os.getenv("S3_ACCESS_KEY")
+                or os.getenv("AWS_ACCESS_KEY_ID")
+                or os.getenv("MINIO_ACCESS_KEY")
+                or os.getenv("MINIO_ROOT_USER")
+            ),
+            # 访问密钥：优先使用下载/通用S3命名，再兼容AWS与MinIO常见命名
+            "aws_secret_access_key": (
+                os.getenv("S3_SECRET_ACCESS_KEY")
+                or os.getenv("S3_SECRET_KEY")
+                or os.getenv("AWS_SECRET_ACCESS_KEY")
+                or os.getenv("MINIO_SECRET_KEY")
+                or os.getenv("MINIO_ROOT_PASSWORD")
+            ),
+            # 端点：兼容 S3_ENDPOINT_URL / S3_ENDPOINT / MINIO_ENDPOINT
+            "s3_endpoint_url": (
+                os.getenv("S3_ENDPOINT_URL")
+                or os.getenv("S3_ENDPOINT")
+                or os.getenv("MINIO_ENDPOINT")
+            ),
+            # 区域：兼容 S3_REGION / AWS_REGION，默认 us-east-1
             "aws_region": os.getenv("S3_REGION") or os.getenv("AWS_REGION", "us-east-1"),
-            "bucket_name": os.getenv("S3_BUCKET", "ai-file")
+            # 存储桶：兼容 S3_BUCKET（若不存在则使用默认 ai-file）
+            "bucket_name": (
+                os.getenv("S3_BUCKET")
+                or os.getenv("UPLOAD_S3_BUCKET")  # 若只配置了上传桶名，下载也可复用
+                or "ai-file"
+            ),
         }
     
     def create_s3_client(self, config: Optional[Dict[str, Any]] = None) -> boto3.client:

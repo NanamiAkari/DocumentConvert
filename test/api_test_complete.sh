@@ -36,8 +36,7 @@ echo ""
 echo "2️⃣ 测试创建PDF转Markdown任务..."
 create_response=$(curl -s -X POST "$BASE_URL/api/tasks/create" \
   -F "task_type=pdf_to_markdown" \
-  -F "bucket_name=$TEST_BUCKET" \
-  -F "file_path=$TEST_FILE" \
+  -F "input_path=/workspace/test/人人皆可vibe编程.pdf" \
   -F "platform=$PLATFORM" \
   -F "priority=high")
 
@@ -108,18 +107,15 @@ echo ""
 
 # 10. 测试系统统计
 echo "🔟 测试系统统计..."
-stats_response=$(curl -s "$BASE_URL/api/statistics")
+stats_response=$(curl -s "$BASE_URL/api/stats")
 echo "系统统计响应: $stats_response"
 echo ""
 
 # 11. 创建Office转PDF任务
 echo "1️⃣1️⃣ 测试创建Office转PDF任务..."
-office_response=$(curl -s -X POST "$BASE_URL/api/tasks/create" \
-  -F "task_type=office_to_pdf" \
-  -F "bucket_name=$TEST_BUCKET" \
-  -F "file_path=presentations/sample.pptx" \
-  -F "platform=$PLATFORM" \
-  -F "priority=normal")
+office_response=$(curl -s -X POST "$BASE_URL/api/tasks" \
+  -H "Content-Type: application/json" \
+  -d '{"task_type": "office_to_pdf", "input_path": "/workspace/test/智涌君.docx", "output_path": "/workspace/output/temp/智涌君_test.pdf", "priority": "normal"}')
 
 echo "Office转PDF任务响应: $office_response"
 office_task_id=$(echo $office_response | jq -r '.task_id')
@@ -128,12 +124,9 @@ echo ""
 
 # 12. 创建Office转Markdown任务
 echo "1️⃣2️⃣ 测试创建Office转Markdown任务..."
-office_md_response=$(curl -s -X POST "$BASE_URL/api/tasks/create" \
-  -F "task_type=office_to_markdown" \
-  -F "bucket_name=$TEST_BUCKET" \
-  -F "file_path=documents/sample.docx" \
-  -F "platform=$PLATFORM" \
-  -F "priority=low")
+office_md_response=$(curl -s -X POST "$BASE_URL/api/tasks" \
+  -H "Content-Type: application/json" \
+  -d '{"task_type": "office_to_markdown", "input_path": "/workspace/test/智涌君.docx", "output_path": "/workspace/output/temp/智涌君_test.md", "priority": "low"}')
 
 echo "Office转Markdown任务响应: $office_md_response"
 office_md_task_id=$(echo $office_md_response | jq -r '.task_id')
@@ -142,12 +135,9 @@ echo ""
 
 # 13. 测试错误处理 - 无效任务类型
 echo "1️⃣3️⃣ 测试错误处理 - 无效任务类型..."
-error_response=$(curl -s -X POST "$BASE_URL/api/tasks/create" \
-  -F "task_type=invalid_type" \
-  -F "bucket_name=$TEST_BUCKET" \
-  -F "file_path=$TEST_FILE" \
-  -F "platform=$PLATFORM" \
-  -F "priority=high")
+error_response=$(curl -s -X POST "$BASE_URL/api/tasks" \
+  -H "Content-Type: application/json" \
+  -d '{"task_type": "invalid_type", "input_path": "/workspace/test/人人皆可vibe编程.pdf", "output_path": "/workspace/output/temp/test.md", "priority": "high"}')
 
 echo "错误响应: $error_response"
 echo ""
@@ -163,7 +153,7 @@ echo "1️⃣5️⃣ 最终状态检查..."
 final_health=$(curl -s "$BASE_URL/health")
 echo "最终健康状态: $final_health"
 
-final_stats=$(curl -s "$BASE_URL/api/statistics")
+final_stats=$(curl -s "$BASE_URL/api/stats")
 echo "最终系统统计: $final_stats"
 echo ""
 

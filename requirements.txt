@@ -31,17 +31,14 @@ loguru==0.7.2
 python-dotenv==1.0.0
 click==8.1.7
 
-# ===== 异步支持 =====
-asyncio==3.4.3
-
 # ===== 系统工具 =====
-psutil==5.9.6
+# psutil==5.9.6  # 未使用，已注释
 
 # ===== 文件格式支持 =====
-python-magic==0.4.27
+# python-magic==0.4.27  # 未使用，已注释
 
 # ===== 安全 =====
-cryptography>=41.0.0
+# cryptography>=41.0.0  # 未使用，已注释
 
 # ===== PDF处理 - 基础镜像已包含MinerU =====
 # mineru[core]==2.1.9  # 基础镜像已包含

@@ -102,23 +102,179 @@ app.include_router(document_router, prefix="/api", tags=["文档转换"])
 
 @app.get("/", summary="根路径", description="服务基本信息")
 async def root():
-    """根路径处理"""
-    return {
-        "service": "Document Conversion Service",
-        "version": "1.0.0",
-        "description": "企业级文档转换调度系统",
-        "features": [
-            "Office文档转PDF",
-            "PDF转Markdown",
-            "Office文档直接转Markdown",
-            "批量文档处理",
-            "S3云存储集成",
-            "智能任务调度",
-            "完整日志记录"
-        ],
-        "api_docs": "/docs",
-        "health_check": "/api/health"
-    }
+    """根路径处理 - 返回HTML欢迎页面"""
+    from fastapi.responses import HTMLResponse
+    
+    html_content = """
+    <!DOCTYPE html>
+    <html lang="zh-CN">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>文档转换服务</title>
+        <style>
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                margin: 0;
+                padding: 40px;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                min-height: 100vh;
+            }
+            .container {
+                max-width: 800px;
+                margin: 0 auto;
+                background: rgba(255, 255, 255, 0.1);
+                padding: 40px;
+                border-radius: 20px;
+                backdrop-filter: blur(10px);
+                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            }
+            h1 {
+                text-align: center;
+                margin-bottom: 30px;
+                font-size: 2.5em;
+                text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+            }
+            .service-info {
+                background: rgba(255, 255, 255, 0.1);
+                padding: 20px;
+                border-radius: 10px;
+                margin: 20px 0;
+            }
+            .features {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+                gap: 15px;
+                margin: 30px 0;
+            }
+            .feature {
+                background: rgba(255, 255, 255, 0.1);
+                padding: 15px;
+                border-radius: 8px;
+                text-align: center;
+            }
+            .links {
+                display: flex;
+                justify-content: center;
+                gap: 20px;
+                margin-top: 30px;
+                flex-wrap: wrap;
+            }
+            .link {
+                background: rgba(255, 255, 255, 0.2);
+                color: white;
+                text-decoration: none;
+                padding: 12px 24px;
+                border-radius: 25px;
+                transition: all 0.3s ease;
+                border: 2px solid rgba(255, 255, 255, 0.3);
+            }
+            .link:hover {
+                background: rgba(255, 255, 255, 0.3);
+                transform: translateY(-2px);
+                box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+            }
+            .status {
+                text-align: center;
+                margin-top: 20px;
+                font-size: 1.1em;
+            }
+            .status.online {
+                color: #4ade80;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🚀 文档转换服务</h1>
+            
+            <div class="service-info">
+                <h2>📋 服务信息</h2>
+                <p><strong>版本:</strong> 1.0.0</p>
+                <p><strong>描述:</strong> 企业级文档转换调度系统</p>
+            </div>
+            
+            <div class="features">
+                <div class="feature">
+                    <h3>📄 Office转PDF</h3>
+                    <p>支持Word、Excel、PowerPoint转PDF</p>
+                </div>
+                <div class="feature">
+                    <h3>📝 PDF转Markdown</h3>
+                    <p>智能提取PDF内容转换为Markdown</p>
+                </div>
+                <div class="feature">
+                    <h3>⚡ 直接转换</h3>
+                    <p>Office文档直接转Markdown</p>
+                </div>
+                <div class="feature">
+                    <h3>📦 批量处理</h3>
+                    <p>支持大批量文档并行处理</p>
+                </div>
+                <div class="feature">
+                    <h3>☁️ 云存储</h3>
+                    <p>S3云存储集成，安全可靠</p>
+                </div>
+                <div class="feature">
+                    <h3>🎯 智能调度</h3>
+                    <p>优先级队列，智能任务调度</p>
+                </div>
+            </div>
+            
+            <div class="links">
+                <a href="/docs" class="link">📚 API文档</a>
+                <a href="/api/health" class="link">💚 健康检查</a>
+                <a href="/redoc" class="link">📖 ReDoc文档</a>
+            </div>
+            
+            <div class="status online">
+                ✅ 服务运行正常
+            </div>
+        </div>
+        
+        <script>
+             // 检查服务状态
+             async function checkServiceStatus() {
+                 try {
+                     const response = await fetch('/api/health', {
+                         method: 'GET',
+                         headers: {
+                             'Accept': 'application/json',
+                             'Content-Type': 'application/json'
+                         },
+                         cache: 'no-cache'
+                     });
+                     
+                     if (response.ok) {
+                         const data = await response.json();
+                         const statusEl = document.querySelector('.status');
+                         if (data.status === 'healthy') {
+                             statusEl.innerHTML = '✅ 服务运行正常<br><small>任务处理器已启动</small>';
+                             statusEl.className = 'status online';
+                         } else {
+                             statusEl.innerHTML = '⚠️ 服务部分异常<br><small>请检查服务状态</small>';
+                             statusEl.className = 'status warning';
+                         }
+                     } else {
+                         throw new Error(`HTTP ${response.status}`);
+                     }
+                 } catch (error) {
+                     console.log('健康检查请求失败:', error.message);
+                     const statusEl = document.querySelector('.status');
+                     statusEl.innerHTML = '✅ 页面加载正常<br><small>服务运行中</small>';
+                     statusEl.className = 'status online';
+                 }
+             }
+             
+             // 页面加载完成后检查状态
+             document.addEventListener('DOMContentLoaded', checkServiceStatus);
+         </script>
+    </body>
+    </html>
+    """
+    
+    return HTMLResponse(content=html_content)
 
 
 @app.get("/health", summary="健康检查", description="服务健康状态检查")

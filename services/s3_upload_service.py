@@ -293,6 +293,8 @@ class S3UploadService:
                         )
 
                         if result.get('success'):
+                            # 添加relative_path字段到结果中
+                            result['relative_path'] = str(relative_path)
                             uploaded_files.append(result)
                             total_size += result.get('file_size', 0)
                         else:
@@ -499,7 +501,7 @@ class S3UploadService:
             )
 
             if result['success']:
-                logger.info(f"Complete conversion result uploaded for task {task_id}: {result['uploaded_count']} files, {result['total_size']} bytes")
+                logger.info(f"Complete conversion result uploaded for task {task_id}: {result['uploaded_files_count']} files, {result['total_uploaded_size']} bytes")
 
                 # 构建主要文件的URL（通常是Markdown文件）
                 main_file_url = None
@@ -513,9 +515,9 @@ class S3UploadService:
                     's3_prefix': s3_prefix,
                     's3_url': main_file_url,  # 主要文件URL（兼容现有代码）
                     'uploaded_files': result['uploaded_files'],
-                    'total_files': result['uploaded_count'],
-                    'total_size': result['total_size'],
-                    'file_size': result['total_size'],  # 兼容现有代码
+                    'total_files': result['uploaded_files_count'],
+                    'total_size': result['total_uploaded_size'],
+                    'file_size': result['total_uploaded_size'],  # 兼容现有代码
                     'upload_time': (datetime.now() - datetime.fromisoformat(metadata['upload-time'].replace('Z', '+00:00'))).total_seconds()
                 }
             else:

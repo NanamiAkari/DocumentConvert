@@ -142,6 +142,7 @@ cython_debug/
 output/
 task_workspace/
 temp/
+minio-data/
 
 # 临时文件
 *.tmp

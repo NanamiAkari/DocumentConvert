@@ -208,6 +208,104 @@ class S3DownloadService:
                 'error_type': type(e).__name__
             }
     
+    async def download_file_data(self,
+                               bucket_name: str,
+                               s3_key: str,
+                               s3_config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        从S3下载文件数据到内存
+
+        Args:
+            bucket_name: S3存储桶名称
+            s3_key: S3对象键
+            s3_config: S3配置，如果为None则使用默认配置
+
+        Returns:
+            下载结果字典，包含文件数据
+        """
+        start_time = datetime.now()
+
+        try:
+            # 应用MediaConvert的中文文件名处理方案
+            from utils.encoding_utils import EncodingUtils
+
+            # 确保S3 key是正确的UTF-8编码
+            s3_key = EncodingUtils.ensure_utf8(s3_key)
+            logger.debug(f"Processed S3 key: {s3_key}")
+
+            # 使用配置或默认配置
+            config = s3_config or self.default_config
+
+            # 创建S3客户端
+            s3_client = self.create_s3_client(config)
+            
+            logger.info(f"Starting download from s3://{bucket_name}/{s3_key} to memory")
+            
+            # 获取文件信息
+            try:
+                head_response = s3_client.head_object(Bucket=bucket_name, Key=s3_key)
+                file_size = head_response.get('ContentLength', 0)
+                last_modified = head_response.get('LastModified')
+                content_type = head_response.get('ContentType', 'application/octet-stream')
+                
+                logger.info(f"File info - Size: {file_size} bytes, Type: {content_type}, Modified: {last_modified}")
+                
+            except ClientError as e:
+                if e.response['Error']['Code'] == 'NoSuchKey':
+                    raise FileNotFoundError(f"File not found in S3: s3://{bucket_name}/{s3_key}")
+                else:
+                    raise
+            
+            # 在线程池中执行下载（避免阻塞事件循环）
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                lambda: s3_client.get_object(Bucket=bucket_name, Key=s3_key)
+            )
+            
+            # 读取文件数据
+            file_data = response['Body'].read()
+            
+            end_time = datetime.now()
+            download_time = (end_time - start_time).total_seconds()
+            
+            logger.info(f"Successfully downloaded {len(file_data)} bytes to memory in {download_time:.2f}s")
+            
+            return {
+                'success': True,
+                'data': file_data,
+                'file_size': len(file_data),
+                'download_time': download_time,
+                'content_type': content_type,
+                's3_url': f"s3://{bucket_name}/{s3_key}",
+                'last_modified': last_modified.isoformat() if last_modified else None
+            }
+            
+        except FileNotFoundError as e:
+            logger.error(f"File not found: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'error_type': 'FileNotFoundError'
+            }
+        except ClientError as e:
+            error_code = e.response['Error']['Code']
+            error_message = e.response['Error']['Message']
+            logger.error(f"S3 client error ({error_code}): {error_message}")
+            return {
+                'success': False,
+                'error': f"S3 error: {error_message}",
+                'error_type': 'S3ClientError',
+                'error_code': error_code
+            }
+        except Exception as e:
+            logger.error(f"Unexpected error during download: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'error_type': type(e).__name__
+            }
+
     async def check_file_exists(self, 
                               bucket_name: str,
                               s3_key: str,

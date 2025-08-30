@@ -61,10 +61,24 @@ class DocumentService:
     def _check_dependencies(self):
         """检查转换工具依赖"""
         # 检查LibreOffice
-        if not os.path.exists(self.libreoffice_path):
-            self.logger.warning(f"LibreOffice not found at {self.libreoffice_path}")
-        else:
-            self.logger.info(f"LibreOffice found at {self.libreoffice_path}")
+        try:
+            # 如果是绝对路径，检查文件是否存在
+            if os.path.isabs(self.libreoffice_path):
+                if not os.path.exists(self.libreoffice_path):
+                    self.logger.warning(f"LibreOffice not found at {self.libreoffice_path}")
+                else:
+                    self.logger.info(f"LibreOffice found at {self.libreoffice_path}")
+            else:
+                # 如果是命令名，检查是否在PATH中
+                result = subprocess.run(['which', self.libreoffice_path], 
+                                      capture_output=True, text=True)
+                if result.returncode == 0:
+                    actual_path = result.stdout.strip()
+                    self.logger.info(f"LibreOffice found at {actual_path}")
+                else:
+                    self.logger.warning(f"LibreOffice command '{self.libreoffice_path}' not found in PATH")
+        except Exception as e:
+            self.logger.warning(f"Error checking LibreOffice: {e}")
     
     async def convert_document(self, 
                               input_path: str,
@@ -175,6 +189,8 @@ class DocumentService:
                                      output_path: str, 
                                      params: Dict[str, Any]) -> Dict[str, Any]:
         """PDF转Markdown"""
+        import shutil  # 在方法开始时导入shutil，避免在finally块中未定义
+        
         self.logger.info(f"Converting PDF to Markdown: {input_path} -> {output_path}")
         
         input_file = Path(input_path)
@@ -276,7 +292,6 @@ class DocumentService:
                     images_moved = []
                     try:
                         if Path(local_image_dir).exists():
-                            import shutil
                             if images_output_dir.exists():
                                 shutil.rmtree(images_output_dir)
                             shutil.move(local_image_dir, images_output_dir)
@@ -293,7 +308,6 @@ class DocumentService:
                     # 清理剩余的临时目录
                     try:
                         if temp_output_dir.exists():
-                            import shutil
                             shutil.rmtree(temp_output_dir)
                             self.logger.debug(f"Cleaned up temp directory: {temp_output_dir}")
                     except Exception as cleanup_error:

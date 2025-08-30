@@ -1,99 +1,590 @@
-# 文档转换服务API完整指南
+# 文档转换服务 API 完整指南
 
-本文档提供文档转换服务的完整使用指南，包括服务启动、API使用示例、详细的curl命令、响应格式和实际使用场景。
+## 📋 API 基本信息
 
-## 🌐 API基础信息
+- **服务名称**: 文档转换服务 (Document Conversion Service)
+- **API版本**: v1.0.0
+- **基础URL**: `http://localhost:8001` (开发环境)
+- **生产环境URL**: `https://api.document-converter.example.com`
+- **协议**: HTTP/HTTPS
+- **数据格式**: JSON + multipart/form-data
+- **认证方式**: 无需认证（开发环境），JWT Token（生产环境）
+- **API文档**: `http://localhost:8001/docs` (Swagger UI)
+- **ReDoc文档**: `http://localhost:8001/redoc`
 
-- **基础URL**: `http://localhost:8000` (本地部署) 或 `http://your-server:33081` (生产环境)
-- **API版本**: v2.0
-- **文档地址**: `http://localhost:8000/docs` (Swagger UI)
-- **内容类型**: `application/json` 或 `multipart/form-data`
-
-## 🚀 服务启动完整流程
+## 🚀 服务启动
 
 ### 1. 启动MinIO服务
 ```bash
-docker compose up -d minio
-```
-**效果**：启动MinIO服务作为S3存储后端，提供文件存储和管理功能。服务将在端口9000（API）和9001（控制台）上运行。
+# 方法1: 使用Docker启动MinIO
+docker run -d \
+  --name minio \
+  -p 9003:9000 \
+  -p 9004:9001 \
+  -e MINIO_ROOT_USER=minioadmin \
+  -e MINIO_ROOT_PASSWORD=minioadmin \
+  -v $(pwd)/minio-data:/data \
+  minio/minio server /data --address ":9000" --console-address ":9001"
 
-### 2. 创建数据目录
-```bash
-mkdir -p ./data/{database,logs,workspace,temp,minio}
-```
-**效果**：创建项目运行所需的数据目录结构，包括数据库文件、日志文件、工作空间、临时文件和MinIO数据存储目录。
+# 方法2: 直接运行MinIO（推荐开发环境）
+MINIO_ROOT_USER=minioadmin MINIO_ROOT_PASSWORD=minioadmin \
+minio server ./minio-data --address ":9003" --console-address ":9004"
 
-### 3. 创建存储桶
-```bash
-docker exec minio mc mb minio/ai-file
+# 方法3: 使用Docker Compose
+docker-compose up -d minio
 ```
-**效果**：在MinIO中创建名为"ai-file"的存储桶，用于存放转换后的文档文件。
+
+### 2. 创建数据目录和配置
+```bash
+# 创建必要的目录
+mkdir -p minio-data data/input data/output data/temp logs
+
+# 设置权限
+chmod -R 755 minio-data/ data/ logs/
+
+# 创建环境配置文件（如果不存在）
+cat > .env << EOF
+# MinIO配置
+MINIO_ENDPOINT=localhost:9003
+MINIO_ACCESS_KEY=minioadmin
+MINIO_SECRET_KEY=minioadmin
+MINIO_SECURE=false
+DEFAULT_BUCKET=ai-file
+
+# API服务配置
+API_HOST=0.0.0.0
+API_PORT=8001
+
+# 数据库配置
+DATABASE_URL=sqlite+aiosqlite:///./document_converter.db
+EOF
+```
+
+### 3. 创建S3存储桶
+```bash
+# 方法1: 使用mc客户端创建存储桶
+mc alias set local http://localhost:9003 minioadmin minioadmin
+mc mb local/ai-file
+mc mb local/test-bucket
+mc mb local/uploads
+mc mb local/outputs
+
+# 设置存储桶策略（允许公共读取）
+mc anonymous set public local/ai-file
+mc anonymous set public local/outputs
+
+# 方法2: 通过MinIO控制台创建
+# 访问 http://localhost:9004
+# 用户名: minioadmin, 密码: minioadmin
+# 手动创建存储桶: ai-file, test-bucket, uploads, outputs
+
+# 方法3: 使用Python脚本自动创建
+python -c "
+import boto3
+from botocore.client import Config
+
+client = boto3.client('s3',
+    endpoint_url='http://localhost:9003',
+    aws_access_key_id='minioadmin',
+    aws_secret_access_key='minioadmin',
+    config=Config(signature_version='s3v4')
+)
+
+buckets = ['ai-file', 'test-bucket', 'uploads', 'outputs']
+for bucket in buckets:
+    try:
+        client.create_bucket(Bucket=bucket)
+        print(f'Created bucket: {bucket}')
+    except Exception as e:
+        print(f'Bucket {bucket} already exists or error: {e}')
+"
+```
 
 ### 4. 安装Python依赖
 ```bash
-pip install -i https://mirrors.cloud.tencent.com/pypi/simple -r requirements.txt
+# 创建虚拟环境（推荐）
+python -m venv venv
+source venv/bin/activate  # Linux/Mac
+# 或
+venv\Scripts\activate     # Windows
+
+# 使用国内镜像安装依赖（推荐）
+pip install -r requirements.txt -i https://mirrors.cloud.tencent.com/pypi/simple
+
+# 或使用默认源
+pip install -r requirements.txt
+
+# 验证关键依赖安装
+python -c "import fastapi, uvicorn, sqlalchemy, aiosqlite, boto3, gradio; print('All dependencies installed successfully')"
+
+# 如果需要GPU支持（可选）
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
 ```
-**效果**：使用腾讯云镜像源安装项目所需的Python依赖包，包括FastAPI、aiosqlite、sqlalchemy等核心组件。
 
 ### 5. 启动文档转换服务
 ```bash
+# 方法1: 直接启动API服务
 python main.py
+
+# 方法2: 使用uvicorn启动API服务（推荐开发环境）
+uvicorn main:app --host 0.0.0.0 --port 8001 --log-level info --reload
+
+# 方法3: 启动Gradio Web界面（新终端窗口）
+python gradio_app.py
+
+# 方法4: 后台启动API服务
+nohup uvicorn main:app --host 0.0.0.0 --port 8001 --log-level info > logs/api.log 2>&1 &
+
+# 方法5: 后台启动Gradio服务
+nohup python gradio_app.py > logs/gradio.log 2>&1 &
+
+# 方法6: 使用Docker Compose启动所有服务
+docker-compose up -d
+
+# 方法7: 生产环境启动（使用Gunicorn）
+gunicorn main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8001 --log-level info
 ```
-**效果**：启动文档转换服务，服务将在http://localhost:8000上运行，提供REST API接口用于文档转换任务的创建和管理。
 
-### 6. 验证服务状态
+### 6. 验证服务启动
 ```bash
-curl -f http://localhost:8000/health
+# 检查API服务健康状态
+curl http://localhost:8001/health
+
+# 预期响应
+{
+  "status": "healthy",
+  "timestamp": "2025-01-25T10:00:00Z",
+  "version": "1.0.0",
+  "services": {
+    "database": "connected",
+    "minio": "connected"
+  },
+  "system_info": {
+    "python_version": "3.9.x",
+    "platform": "Linux",
+    "memory_usage": "256MB",
+    "disk_space": "50GB available"
+  }
+}
+
+# 检查API文档访问
+curl -I http://localhost:8001/docs
+# 预期: HTTP/1.1 200 OK
+
+# 检查Gradio界面（如果启动）
+curl -I http://localhost:7860
+# 预期: HTTP/1.1 200 OK
+
+# 检查MinIO服务
+curl -I http://localhost:9003/minio/health/live
+# 预期: HTTP/1.1 200 OK
+
+# 检查MinIO控制台
+curl -I http://localhost:9004
+# 预期: HTTP/1.1 200 OK
+
+# 列出所有可用的API端点
+curl http://localhost:8001/api/endpoints
 ```
-**效果**：检查服务健康状态，确认所有组件正常运行，返回服务状态信息。
 
-## 🔍 服务健康检查
+## 📝 API端点详解
 
-检查服务是否正常运行，获取系统状态信息。
+### 1. 创建PDF转Markdown任务
 
+**端点**: `POST /api/tasks/pdf-to-markdown`
+
+**描述**: 使用MinerU 2.0 AI技术将PDF文件转换为高质量Markdown格式，支持文本提取、图片识别、表格解析和OCR功能
+
+**请求参数**:
+- `file` (file, 必需): PDF文件（支持格式：.pdf，最大100MB）
+- `output_path` (string, 可选): S3输出路径，默认为 `ai-file/output/`
+- `extract_images` (boolean, 可选): 是否提取并保存图片，默认为 `true`
+- `ocr_enabled` (boolean, 可选): 是否启用OCR文字识别，默认为 `true`
+- `table_recognition` (boolean, 可选): 是否启用表格识别，默认为 `true`
+- `formula_recognition` (boolean, 可选): 是否启用公式识别，默认为 `true`
+- `priority` (string, 可选): 任务优先级（low/normal/high），默认为 `normal`
+
+**curl示例**:
 ```bash
-curl -s http://localhost:8000/health
+# 基本转换
+curl -X POST "http://localhost:8001/api/tasks/pdf-to-markdown" \
+  -H "Content-Type: multipart/form-data" \
+  -F "file=@/path/to/document.pdf" \
+  -F "output_path=ai-file/output/" \
+  -F "extract_images=true" \
+  -F "ocr_enabled=true"
+
+# 高级转换（包含所有功能）
+curl -X POST "http://localhost:8001/api/tasks/pdf-to-markdown" \
+  -H "Content-Type: multipart/form-data" \
+  -F "file=@/path/to/document.pdf" \
+  -F "output_path=ai-file/output/" \
+  -F "extract_images=true" \
+  -F "ocr_enabled=true" \
+  -F "table_recognition=true" \
+  -F "formula_recognition=true" \
+  -F "priority=high"
+
+# 快速转换（仅文本）
+curl -X POST "http://localhost:8001/api/tasks/pdf-to-markdown" \
+  -H "Content-Type: multipart/form-data" \
+  -F "file=@/path/to/document.pdf" \
+  -F "extract_images=false" \
+  -F "ocr_enabled=false" \
+  -F "priority=high"
+```
+
+**响应示例**:
+```json
+{
+  "task_id": "pdf_md_20250125_001",
+  "status": "pending",
+  "task_type": "pdf_to_markdown",
+  "message": "PDF转Markdown任务已创建成功",
+  "input_file": {
+    "filename": "document.pdf",
+    "size": 2048576,
+    "s3_path": "ai-file/input/pdf_md_20250125_001/document.pdf"
+  },
+  "output_path": "ai-file/output/pdf_md_20250125_001/",
+  "parameters": {
+    "extract_images": true,
+    "ocr_enabled": true,
+    "table_recognition": true,
+    "formula_recognition": true,
+    "priority": "normal"
+  },
+  "created_at": "2025-01-25T10:00:00Z",
+  "estimated_time": "2-5分钟",
+  "progress": 0,
+  "queue_position": 1
+}
+```
+
+### 2. 创建Office转PDF任务
+
+**端点**: `POST /api/tasks/office-to-pdf`
+
+**描述**: 使用LibreOffice将Office文档（Word、Excel、PowerPoint）转换为高质量PDF格式
+
+**支持格式**: 
+- Word: .doc, .docx, .rtf, .odt
+- Excel: .xls, .xlsx, .ods, .csv
+- PowerPoint: .ppt, .pptx, .odp
+
+**请求参数**:
+- `file` (file, 必需): Office文件（最大50MB）
+- `output_path` (string, 可选): S3输出路径，默认为 `ai-file/output/`
+- `quality` (string, 可选): 输出质量（low/medium/high），默认为 `medium`
+- `page_range` (string, 可选): 页面范围（如"1-5"），默认转换全部页面
+- `orientation` (string, 可选): 页面方向（portrait/landscape），默认为 `portrait`
+- `priority` (string, 可选): 任务优先级（low/normal/high），默认为 `normal`
+
+**curl示例**:
+```bash
+# 基本转换
+curl -X POST "http://localhost:8001/api/tasks/office-to-pdf" \
+  -H "Content-Type: multipart/form-data" \
+  -F "file=@/path/to/document.docx" \
+  -F "output_path=ai-file/output/" \
+  -F "quality=high"
+
+# 高质量转换（指定页面范围）
+curl -X POST "http://localhost:8001/api/tasks/office-to-pdf" \
+  -H "Content-Type: multipart/form-data" \
+  -F "file=@/path/to/presentation.pptx" \
+  -F "output_path=ai-file/output/" \
+  -F "quality=high" \
+  -F "page_range=1-10" \
+  -F "orientation=landscape" \
+  -F "priority=high"
+
+# Excel转换
+curl -X POST "http://localhost:8001/api/tasks/office-to-pdf" \
+  -H "Content-Type: multipart/form-data" \
+  -F "file=@/path/to/spreadsheet.xlsx" \
+  -F "output_path=ai-file/output/" \
+  -F "quality=medium"
+```
+
+**响应示例**:
+```json
+{
+  "task_id": "office_pdf_20250125_002",
+  "status": "pending",
+  "task_type": "office_to_pdf",
+  "message": "Office转PDF任务已创建成功",
+  "input_file": {
+    "filename": "document.docx",
+    "size": 1024000,
+    "format": "docx",
+    "s3_path": "ai-file/input/office_pdf_20250125_002/document.docx"
+  },
+  "output_path": "ai-file/output/office_pdf_20250125_002/",
+  "parameters": {
+    "quality": "high",
+    "page_range": "all",
+    "orientation": "portrait",
+    "priority": "normal"
+  },
+  "created_at": "2025-01-25T10:05:00Z",
+  "estimated_time": "1-3分钟",
+  "progress": 0,
+  "queue_position": 2
+}
+```
+
+### 3. 创建Office转Markdown任务
+
+**端点**: `POST /api/tasks/office-to-markdown`
+
+**描述**: 将Office文档转换为Markdown格式（两步转换：Office→PDF→Markdown），结合LibreOffice和MinerU 2.0的优势
+
+**支持格式**: 与Office转PDF相同
+- Word: .doc, .docx, .rtf, .odt
+- Excel: .xls, .xlsx, .ods, .csv
+- PowerPoint: .ppt, .pptx, .odp
+
+**请求参数**:
+- `file` (file, 必需): Office文件（最大50MB）
+- `output_path` (string, 可选): S3输出路径，默认为 `ai-file/output/`
+- `extract_images` (boolean, 可选): 是否提取并保存图片，默认为 `true`
+- `ocr_enabled` (boolean, 可选): 是否启用OCR文字识别，默认为 `true`
+- `table_recognition` (boolean, 可选): 是否启用表格识别，默认为 `true`
+- `formula_recognition` (boolean, 可选): 是否启用公式识别，默认为 `true`
+- `quality` (string, 可选): 中间PDF质量（low/medium/high），默认为 `medium`
+- `priority` (string, 可选): 任务优先级（low/normal/high），默认为 `normal`
+
+**curl示例**:
+```bash
+# 基本转换
+curl -X POST "http://localhost:8001/api/tasks/office-to-markdown" \
+  -H "Content-Type: multipart/form-data" \
+  -F "file=@/path/to/document.docx" \
+  -F "output_path=ai-file/output/" \
+  -F "extract_images=true" \
+  -F "ocr_enabled=true" \
+  -F "quality=high"
+
+# 完整功能转换
+curl -X POST "http://localhost:8001/api/tasks/office-to-markdown" \
+  -H "Content-Type: multipart/form-data" \
+  -F "file=@/path/to/presentation.pptx" \
+  -F "output_path=ai-file/output/" \
+  -F "extract_images=true" \
+  -F "ocr_enabled=true" \
+  -F "table_recognition=true" \
+  -F "formula_recognition=true" \
+  -F "quality=high" \
+  -F "priority=high"
+
+# Excel转Markdown（适合数据表格）
+curl -X POST "http://localhost:8001/api/tasks/office-to-markdown" \
+  -H "Content-Type: multipart/form-data" \
+  -F "file=@/path/to/data.xlsx" \
+  -F "output_path=ai-file/output/" \
+  -F "table_recognition=true" \
+  -F "quality=medium"
+```
+
+**响应示例**:
+```json
+{
+  "task_id": "office_md_20250125_003",
+  "status": "pending",
+  "task_type": "office_to_markdown",
+  "message": "Office转Markdown任务已创建成功",
+  "input_file": {
+    "filename": "document.docx",
+    "size": 1536000,
+    "format": "docx",
+    "s3_path": "ai-file/input/office_md_20250125_003/document.docx"
+  },
+  "output_path": "ai-file/output/office_md_20250125_003/",
+  "parameters": {
+    "extract_images": true,
+    "ocr_enabled": true,
+    "table_recognition": true,
+    "formula_recognition": true,
+    "quality": "high",
+    "priority": "normal"
+  },
+  "processing_steps": [
+    "office_to_pdf",
+    "pdf_to_markdown"
+  ],
+  "created_at": "2025-01-25T10:10:00Z",
+  "estimated_time": "3-8分钟",
+  "progress": 0,
+  "queue_position": 3
+}
+```
+
+## 6. 系统管理API
+
+### 16. 健康检查
+
+**端点**: `GET /api/health`
+
+**描述**: 检查系统健康状态，包括各个组件的运行状态
+
+**curl示例**:
+```bash
+curl "http://localhost:8001/api/health"
 ```
 
 **响应示例**:
 ```json
 {
   "status": "healthy",
-  "message": "Document Conversion Service is running",
-  "timestamp": "2025-08-09T12:00:00Z",
-  "processor_status": {
-    "running": true,
-    "total_tasks": 25,
-    "active_tasks": 0,
-    "completed_tasks": 23,
-    "failed_tasks": 2
+  "timestamp": "2025-01-25T16:10:00Z",
+  "version": "1.0.0",
+  "uptime": "2小时15分钟",
+  "components": {
+    "api_server": {
+      "status": "healthy",
+      "response_time": "5ms"
+    },
+    "database": {
+      "status": "healthy",
+      "connection_pool": "8/10",
+      "response_time": "12ms"
+    },
+    "minio_storage": {
+      "status": "healthy",
+      "buckets": 1,
+      "total_objects": 156,
+      "total_size": "2.3GB"
+    },
+    "task_processor": {
+      "status": "healthy",
+      "active_workers": 2,
+      "queue_size": 3,
+      "processed_today": 45
+    },
+    "mineru_engine": {
+      "status": "healthy",
+      "version": "2.0.0",
+      "gpu_available": true,
+      "memory_usage": "65%"
+    },
+    "libreoffice": {
+      "status": "healthy",
+      "version": "7.6.0",
+      "instances": 1
+    }
   },
-  "queue_status": {
-    "fetch_queue": 25,
-    "task_processing_queue": 0,
-    "high_priority_queue": 0,
-    "normal_priority_queue": 0,
-    "low_priority_queue": 0,
-    "update_queue": 0,
-    "cleanup_queue": 0,
-    "callback_queue": 0
-  },
-  "workspace_status": {
-    "base_workspace_dir": "/app/task_workspace",
-    "temp_files_dir": "/app/temp_files",
-    "active_task_workspaces": 25,
-    "temp_files_count": 0,
-    "total_workspace_size": 64200518,
-    "temp_files_size": 0
+  "metrics": {
+    "requests_per_minute": 12.5,
+    "average_response_time": "150ms",
+    "error_rate": "2.1%",
+    "cpu_usage": "45%",
+    "memory_usage": "68%",
+    "disk_usage": "23%"
   }
 }
 ```
 
-**状态说明**:
-- `status`: `healthy` 表示服务正常，`unhealthy` 表示服务异常
-- `processor_status`: 任务处理器状态和统计信息
-- `queue_status`: 各个队列的任务数量
-- `workspace_status`: 工作空间使用情况
+### 17. 系统信息
+
+**端点**: `GET /api/system/info`
+
+**描述**: 获取系统详细信息和配置
+
+**curl示例**:
+```bash
+curl "http://localhost:8001/api/system/info"
+```
+
+**响应示例**:
+```json
+{
+  "system": {
+    "name": "DocumentConvert API",
+    "version": "1.0.0",
+    "build_time": "2025-01-25T10:00:00Z",
+    "environment": "development",
+    "python_version": "3.11.5",
+    "platform": "Linux-5.15.0-x86_64"
+  },
+  "configuration": {
+    "max_file_size": "100MB",
+    "supported_formats": {
+      "input": ["pdf", "doc", "docx", "ppt", "pptx", "xls", "xlsx"],
+      "output": ["markdown", "pdf"]
+    },
+    "max_concurrent_tasks": 5,
+    "task_timeout": "30分钟",
+    "storage_backend": "MinIO",
+    "processing_engines": {
+      "pdf_to_markdown": "MinerU 2.0",
+      "office_conversion": "LibreOffice 7.6"
+    }
+  },
+  "features": {
+    "batch_processing": true,
+    "image_extraction": true,
+    "table_recognition": true,
+    "formula_recognition": true,
+    "ocr_support": true,
+    "gpu_acceleration": true
+  }
+}
+```
+
+### 18. 系统配置
+
+**端点**: `GET /api/system/config`
+
+**描述**: 获取系统配置信息（仅管理员可访问）
+
+**请求头**:
+- `Authorization: Bearer <admin_token>` (生产环境)
+
+**curl示例**:
+```bash
+# 开发环境
+curl "http://localhost:8001/api/system/config"
+
+# 生产环境（需要认证）
+curl "http://localhost:8001/api/system/config" \
+  -H "Authorization: Bearer your_admin_token"
+```
+
+**响应示例**:
+```json
+{
+  "database": {
+    "type": "SQLite",
+    "path": "/workspace/tasks.db",
+    "connection_pool_size": 10
+  },
+  "storage": {
+    "backend": "MinIO",
+    "endpoint": "localhost:9003",
+    "bucket": "ai-file",
+    "region": "us-east-1"
+  },
+  "processing": {
+    "max_workers": 5,
+    "task_timeout": 1800,
+    "retry_attempts": 3,
+    "cleanup_interval": 3600
+  },
+  "security": {
+    "cors_enabled": true,
+    "rate_limiting": {
+      "enabled": true,
+      "requests_per_minute": 60
+    }
+  },
+  "logging": {
+    "level": "INFO",
+    "format": "structured",
+    "output": "console"
+  }
+}
+```
 
 ## 📄 任务创建API
 
@@ -179,7 +670,268 @@ curl -X POST "http://localhost:8000/api/tasks/create" \
 - `financial_report.json`: 结构化数据
 - `images/`: 图片和图表
 
+## 4. 批量操作API
+
+### 9. 批量创建任务
+
+**端点**: `POST /api/tasks/batch`
+
+**描述**: 批量创建多个转换任务，支持不同类型的转换任务混合提交
+
+**请求体参数**:
+- `tasks` (array): 任务列表，每个任务包含以下字段：
+  - `task_type` (string): 任务类型（pdf_to_markdown/office_to_pdf/office_to_markdown）
+  - `input_file_path` (string): 输入文件S3路径
+  - `output_path` (string): 输出路径
+  - `parameters` (object, 可选): 转换参数
+  - `priority` (string, 可选): 优先级
+- `batch_name` (string, 可选): 批次名称
+- `callback_url` (string, 可选): 批次完成回调URL
+
+**curl示例**:
+```bash
+curl -X POST "http://localhost:8001/api/tasks/batch" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "batch_name": "文档批量转换_20250125",
+    "callback_url": "https://your-app.com/batch-callback",
+    "tasks": [
+      {
+        "task_type": "pdf_to_markdown",
+        "input_file_path": "ai-file/input/document1.pdf",
+        "output_path": "ai-file/output/batch1/",
+        "parameters": {
+          "extract_images": true,
+          "table_recognition": true
+        },
+        "priority": "high"
+      },
+      {
+        "task_type": "office_to_pdf",
+        "input_file_path": "ai-file/input/presentation.pptx",
+        "output_path": "ai-file/output/batch1/",
+        "parameters": {
+          "orientation": "landscape"
+        },
+        "priority": "normal"
+      }
+    ]
+  }'
+```
+
+**响应示例**:
+```json
+{
+  "message": "批量任务创建成功",
+  "batch_id": "batch_20250125_001",
+  "batch_name": "文档批量转换_20250125",
+  "total_tasks": 2,
+  "created_tasks": [
+    {
+      "task_id": "pdf_md_20250125_003",
+      "task_type": "pdf_to_markdown",
+      "status": "pending",
+      "queue_position": 1
+    },
+    {
+      "task_id": "office_pdf_20250125_004",
+      "task_type": "office_to_pdf",
+      "status": "pending",
+      "queue_position": 2
+    }
+  ],
+  "estimated_completion_time": "2025-01-25T16:15:00Z",
+  "created_at": "2025-01-25T15:45:00Z"
+}
+```
+
+### 10. 批量查询任务状态
+
+**端点**: `GET /api/tasks/batch/{batch_id}`
+
+**描述**: 查询批量任务的整体状态和进度
+
+**路径参数**:
+- `batch_id` (string): 批次ID
+
+**查询参数**:
+- `include_tasks` (boolean, 可选): 是否包含详细任务信息，默认为 `false`
+
+**curl示例**:
+```bash
+# 查询批次概要
+curl -X GET "http://localhost:8001/api/tasks/batch/batch_20250125_001"
+
+# 查询批次详细信息
+curl -X GET "http://localhost:8001/api/tasks/batch/batch_20250125_001?include_tasks=true"
+```
+
+**响应示例**:
+```json
+{
+  "batch_id": "batch_20250125_001",
+  "batch_name": "文档批量转换_20250125",
+  "status": "processing",
+  "progress": {
+    "total_tasks": 2,
+    "completed_tasks": 1,
+    "failed_tasks": 0,
+    "processing_tasks": 1,
+    "pending_tasks": 0,
+    "completion_percentage": 50.0
+  },
+  "timing": {
+    "created_at": "2025-01-25T15:45:00Z",
+    "started_at": "2025-01-25T15:45:30Z",
+    "estimated_completion": "2025-01-25T16:15:00Z",
+    "elapsed_time": "8分30秒"
+  },
+  "tasks": [
+    {
+      "task_id": "pdf_md_20250125_003",
+      "task_type": "pdf_to_markdown",
+      "status": "completed",
+      "progress": 100,
+      "completed_at": "2025-01-25T15:52:15Z"
+    },
+    {
+      "task_id": "office_pdf_20250125_004",
+      "task_type": "office_to_pdf",
+      "status": "processing",
+      "progress": 65,
+      "current_step": "converting"
+    }
+  ]
+}
+```
+
+### 11. 批量取消任务
+
+**端点**: `POST /api/tasks/batch/{batch_id}/cancel`
+
+**描述**: 取消批量任务中的所有未完成任务
+
+**路径参数**:
+- `batch_id` (string): 批次ID
+
+**请求体参数**（可选）:
+- `cancel_processing` (boolean, 可选): 是否取消正在处理的任务，默认为 `false`
+- `reason` (string, 可选): 取消原因
+
+**curl示例**:
+```bash
+# 取消批次中的待处理任务
+curl -X POST "http://localhost:8001/api/tasks/batch/batch_20250125_001/cancel"
+
+# 强制取消所有任务（包括正在处理的）
+curl -X POST "http://localhost:8001/api/tasks/batch/batch_20250125_001/cancel" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "cancel_processing": true,
+    "reason": "用户主动取消"
+  }'
+```
+
+**响应示例**:
+```json
+{
+  "message": "批量任务取消成功",
+  "batch_id": "batch_20250125_001",
+  "cancelled_tasks": [
+    {
+      "task_id": "office_pdf_20250125_004",
+      "previous_status": "processing",
+      "cancelled_at": "2025-01-25T15:55:00Z"
+    }
+  ],
+  "unchanged_tasks": [
+    {
+      "task_id": "pdf_md_20250125_003",
+      "status": "completed",
+      "reason": "任务已完成"
+    }
+  ],
+  "total_cancelled": 1,
+  "total_unchanged": 1
+}
+```
+
+## 5. 文件管理API
+
+### 12. 上传文件
+
+**端点**: `POST /api/files/upload`
+
+**描述**: 上传文件到MinIO存储，支持多种文件格式
+
+**请求参数**:
+- `file` (file): 要上传的文件
+- `bucket` (string, 可选): 存储桶名称，默认为 `ai-file`
+- `path` (string, 可选): 存储路径，默认为 `input/`
+- `overwrite` (boolean, 可选): 是否覆盖同名文件，默认为 `false`
+
+**curl示例**:
+```bash
+# 基本上传
+curl -X POST "http://localhost:8001/api/files/upload" \
+  -F "file=@document.pdf"
+
+# 指定存储路径
+curl -X POST "http://localhost:8001/api/files/upload" \
+  -F "file=@document.pdf" \
+  -F "path=input/documents/"
+
+# 覆盖同名文件
+curl -X POST "http://localhost:8001/api/files/upload" \
+  -F "file=@document.pdf" \
+  -F "bucket=ai-file" \
+  -F "path=input/" \
+  -F "overwrite=true"
+```
+
+**响应示例**:
+```json
+{
+  "message": "文件上传成功",
+  "file_info": {
+    "filename": "document.pdf",
+    "original_name": "document.pdf",
+    "file_path": "ai-file/input/document.pdf",
+    "file_size": 2048576,
+    "file_type": "application/pdf",
+    "upload_time": "2025-01-25T16:00:00Z",
+    "md5_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "download_url": "http://localhost:8001/api/files/download/ai-file/input/document.pdf"
+  }
+}
+```
+
 ## 🔍 任务查询和状态监控API
+
+### 4. 查询任务状态
+
+**端点**: `GET /api/tasks/{task_id}`
+
+**描述**: 查询指定任务的详细状态信息，包括进度、错误信息、输出文件等
+
+**路径参数**:
+- `task_id` (string): 任务ID
+
+**查询参数**:
+- `include_logs` (boolean, 可选): 是否包含处理日志，默认为 `false`
+- `include_files` (boolean, 可选): 是否包含文件列表，默认为 `true`
+
+**curl示例**:
+```bash
+# 基本查询
+curl -X GET "http://localhost:8001/api/tasks/pdf_md_20250125_001"
+
+# 包含详细日志
+curl -X GET "http://localhost:8001/api/tasks/pdf_md_20250125_001?include_logs=true"
+
+# 包含文件信息
+curl -X GET "http://localhost:8001/api/tasks/pdf_md_20250125_001?include_files=true&include_logs=true"
+```
 
 ### 3.1 查询特定任务详情
 
@@ -187,6 +939,68 @@ curl -X POST "http://localhost:8000/api/tasks/create" \
 
 ```bash
 curl -s "http://localhost:8000/api/tasks/26"
+```
+
+**响应示例**:
+```json
+{
+  "task_id": "pdf_md_20250125_001",
+  "status": "completed",
+  "task_type": "pdf_to_markdown",
+  "message": "PDF转Markdown转换完成",
+  "input_file": {
+    "filename": "document.pdf",
+    "size": 2048576,
+    "s3_path": "ai-file/input/pdf_md_20250125_001/document.pdf"
+  },
+  "output_path": "ai-file/output/pdf_md_20250125_001/",
+  "output_files": [
+    {
+      "filename": "document.md",
+      "size": 15360,
+      "s3_path": "ai-file/output/pdf_md_20250125_001/document.md",
+      "download_url": "http://localhost:9003/ai-file/output/pdf_md_20250125_001/document.md"
+    },
+    {
+      "filename": "images/image_001.png",
+      "size": 102400,
+      "s3_path": "ai-file/output/pdf_md_20250125_001/images/image_001.png",
+      "download_url": "http://localhost:9003/ai-file/output/pdf_md_20250125_001/images/image_001.png"
+    }
+  ],
+  "parameters": {
+    "extract_images": true,
+    "ocr_enabled": true,
+    "table_recognition": true,
+    "formula_recognition": true,
+    "priority": "normal"
+  },
+  "timestamps": {
+    "created_at": "2025-01-25T10:00:00Z",
+    "started_at": "2025-01-25T10:00:30Z",
+    "completed_at": "2025-01-25T10:03:45Z"
+  },
+  "processing_time": "3分15秒",
+  "progress": 100,
+  "statistics": {
+    "pages_processed": 15,
+    "images_extracted": 8,
+    "tables_detected": 3,
+    "formulas_detected": 2
+  },
+  "logs": [
+    {
+      "timestamp": "2025-01-25T10:00:30Z",
+      "level": "INFO",
+      "message": "开始处理PDF文件"
+    },
+    {
+      "timestamp": "2025-01-25T10:03:45Z",
+      "level": "INFO",
+      "message": "转换完成，生成Markdown文件"
+    }
+  ]
+}
 ```
 
 **响应示例 - 已完成的PDF转Markdown任务**:
@@ -217,6 +1031,145 @@ curl -s "http://localhost:8000/api/tasks/26"
 }
 ```
 
+### 5. 查询所有任务
+
+**端点**: `GET /api/tasks`
+
+**描述**: 查询所有任务列表，支持分页、过滤、排序和搜索
+
+**查询参数**:
+- `status` (string, 可选): 任务状态过滤（pending/processing/completed/failed）
+- `task_type` (string, 可选): 任务类型过滤（pdf_to_markdown/office_to_pdf/office_to_markdown）
+- `priority` (string, 可选): 优先级过滤（low/normal/high）
+- `page` (int, 可选): 页码，默认为 1
+- `limit` (int, 可选): 每页数量，默认为 20，最大100
+- `sort_by` (string, 可选): 排序字段（created_at/updated_at/priority），默认为 `created_at`
+- `sort_order` (string, 可选): 排序方向（asc/desc），默认为 `desc`
+- `search` (string, 可选): 搜索关键词（匹配文件名）
+- `date_from` (string, 可选): 开始日期过滤（ISO格式）
+- `date_to` (string, 可选): 结束日期过滤（ISO格式）
+
+**curl示例**:
+```bash
+# 查询所有任务
+curl -X GET "http://localhost:8001/api/tasks"
+
+# 查询已完成的任务
+curl -X GET "http://localhost:8001/api/tasks?status=completed"
+
+# 查询PDF转Markdown任务
+curl -X GET "http://localhost:8001/api/tasks?task_type=pdf_to_markdown"
+
+# 查询高优先级任务
+curl -X GET "http://localhost:8001/api/tasks?priority=high"
+
+# 分页查询（按更新时间排序）
+curl -X GET "http://localhost:8001/api/tasks?page=2&limit=10&sort_by=updated_at&sort_order=desc"
+
+# 搜索特定文件
+curl -X GET "http://localhost:8001/api/tasks?search=document.pdf"
+
+# 日期范围查询
+curl -X GET "http://localhost:8001/api/tasks?date_from=2025-01-25T00:00:00Z&date_to=2025-01-25T23:59:59Z"
+
+# 复合查询
+curl -X GET "http://localhost:8001/api/tasks?status=completed&task_type=pdf_to_markdown&priority=high&limit=5"
+```
+
+**响应示例**:
+```json
+{
+  "tasks": [
+    {
+      "task_id": "pdf_md_20250125_001",
+      "status": "completed",
+      "task_type": "pdf_to_markdown",
+      "input_file": {
+        "filename": "document.pdf",
+        "size": 2048576
+      },
+      "output_files_count": 9,
+      "priority": "normal",
+      "timestamps": {
+        "created_at": "2025-01-25T10:00:00Z",
+        "updated_at": "2025-01-25T10:03:45Z"
+      },
+      "processing_time": "3分15秒",
+      "progress": 100
+    },
+    {
+      "task_id": "office_pdf_20250125_002",
+      "status": "processing",
+      "task_type": "office_to_pdf",
+      "input_file": {
+        "filename": "presentation.pptx",
+        "size": 1024000
+      },
+      "priority": "high",
+      "timestamps": {
+        "created_at": "2025-01-25T10:05:00Z",
+        "updated_at": "2025-01-25T10:07:30Z"
+      },
+      "processing_time": "2分30秒",
+      "progress": 65,
+      "current_step": "Converting slides to PDF",
+      "queue_position": null
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "limit": 20,
+    "total": 25,
+    "pages": 2,
+    "has_next": true,
+    "has_prev": false
+  },
+  "statistics": {
+    "total_tasks": 25,
+    "pending": 3,
+    "processing": 2,
+    "completed": 18,
+    "failed": 2
+  },
+  "filters_applied": {
+    "status": null,
+    "task_type": null,
+    "priority": null,
+    "search": null
+  }
+}
+```
+
+### 13. 下载文件
+
+**端点**: `GET /api/files/download/{file_path:path}`
+
+**描述**: 从MinIO存储下载文件
+
+**路径参数**:
+- `file_path` (string): 文件的完整S3路径（包括bucket）
+
+**查询参数**:
+- `as_attachment` (boolean, 可选): 是否作为附件下载，默认为 `false`
+- `filename` (string, 可选): 自定义下载文件名
+
+**curl示例**:
+```bash
+# 直接下载
+curl "http://localhost:8001/api/files/download/ai-file/output/document.md" \
+  -o document.md
+
+# 作为附件下载
+curl "http://localhost:8001/api/files/download/ai-file/output/document.md?as_attachment=true" \
+  -o document.md
+
+# 自定义文件名下载
+curl "http://localhost:8001/api/files/download/ai-file/output/document.md?filename=my_document.md" \
+  -o my_document.md
+```
+
+**响应**: 文件内容（二进制流）
+
 ### 3.2 查询所有任务列表
 
 获取所有任务的列表，包括任务ID、状态、类型、创建时间等信息，支持分页和过滤功能。
@@ -241,12 +1194,763 @@ curl "http://localhost:8000/api/tasks?status=completed&limit=10"
 curl "http://localhost:8000/api/tasks?task_type=pdf_to_markdown&limit=5"
 ```
 
-### 3.5 获取任务统计
+### 14. 列出文件
 
-获取系统任务统计信息，包括总任务数、各状态任务数量、处理器运行状态等系统概览数据。
+**端点**: `GET /api/files/list`
+
+**描述**: 列出指定路径下的所有文件和文件夹
+
+**查询参数**:
+- `bucket` (string, 可选): 存储桶名称，默认为 `ai-file`
+- `prefix` (string, 可选): 路径前缀，默认为空（列出根目录）
+- `recursive` (boolean, 可选): 是否递归列出子目录，默认为 `false`
+- `limit` (integer, 可选): 返回结果数量限制，默认为 100
+- `marker` (string, 可选): 分页标记
+
+**curl示例**:
+```bash
+# 列出根目录
+curl "http://localhost:8001/api/files/list"
+
+# 列出指定路径
+curl "http://localhost:8001/api/files/list?prefix=output/"
+
+# 递归列出所有文件
+curl "http://localhost:8001/api/files/list?prefix=output/&recursive=true"
+
+# 分页列出
+curl "http://localhost:8001/api/files/list?limit=50&marker=output/document1.md"
+```
+
+**响应示例**:
+```json
+{
+  "bucket": "ai-file",
+  "prefix": "output/",
+  "files": [
+    {
+      "name": "document1.md",
+      "path": "ai-file/output/document1.md",
+      "size": 15360,
+      "last_modified": "2025-01-25T15:30:00Z",
+      "etag": "d41d8cd98f00b204e9800998ecf8427e",
+      "content_type": "text/markdown",
+      "is_directory": false,
+      "download_url": "http://localhost:8001/api/files/download/ai-file/output/document1.md"
+    },
+    {
+      "name": "images/",
+      "path": "ai-file/output/images/",
+      "size": 0,
+      "last_modified": "2025-01-25T15:25:00Z",
+      "is_directory": true
+    }
+  ],
+  "total_count": 2,
+  "has_more": false,
+  "next_marker": null
+}
+```
+
+### 15. 删除文件
+
+**端点**: `DELETE /api/files/{file_path:path}`
+
+**描述**: 删除MinIO存储中的文件或文件夹
+
+**路径参数**:
+- `file_path` (string): 文件的完整S3路径（包括bucket）
+
+**查询参数**:
+- `recursive` (boolean, 可选): 如果是文件夹，是否递归删除，默认为 `false`
+- `force` (boolean, 可选): 是否强制删除，默认为 `false`
+
+**curl示例**:
+```bash
+# 删除单个文件
+curl -X DELETE "http://localhost:8001/api/files/ai-file/output/document.md"
+
+# 递归删除文件夹
+curl -X DELETE "http://localhost:8001/api/files/ai-file/output/images/?recursive=true"
+
+# 强制删除
+curl -X DELETE "http://localhost:8001/api/files/ai-file/output/document.md?force=true"
+```
+
+**响应示例**:
+```json
+{
+  "message": "文件删除成功",
+  "deleted_files": [
+    "ai-file/output/document.md"
+  ],
+  "deleted_count": 1,
+  "storage_freed": "15.0KB",
+  "deleted_at": "2025-01-25T16:05:00Z"
+}
+```
+
+### 6. 获取任务统计信息
+
+**端点**: `GET /api/tasks/statistics`
+
+**描述**: 获取任务处理统计信息，包括数量、成功率、处理时间等指标
+
+**查询参数**:
+- `period` (string, 可选): 统计周期（today/week/month/year/all），默认为 `today`
+- `task_type` (string, 可选): 按任务类型过滤统计
+- `group_by` (string, 可选): 分组统计（hour/day/week/month），默认为 `day`
+
+**curl示例**:
+```bash
+# 今日统计
+curl -X GET "http://localhost:8001/api/tasks/statistics"
+
+# 本周统计
+curl -X GET "http://localhost:8001/api/tasks/statistics?period=week"
+
+# 按任务类型统计
+curl -X GET "http://localhost:8001/api/tasks/statistics?task_type=pdf_to_markdown&period=month"
+
+# 按小时分组统计
+curl -X GET "http://localhost:8001/api/tasks/statistics?period=today&group_by=hour"
+
+# 全部任务统计
+curl -X GET "http://localhost:8001/api/tasks/statistics?period=all"
+```
+
+**响应示例**:
+```json
+{
+  "period": "today",
+  "date_range": {
+    "start": "2025-01-25T00:00:00Z",
+    "end": "2025-01-25T23:59:59Z"
+  },
+  "summary": {
+    "total_tasks": 25,
+    "completed_tasks": 18,
+    "failed_tasks": 2,
+    "processing_tasks": 2,
+    "pending_tasks": 3,
+    "success_rate": 85.7,
+    "failure_rate": 9.5,
+    "average_processing_time": "4分32秒",
+    "total_processing_time": "1小时53分钟",
+    "total_files_processed": 25,
+    "total_output_size": "156.7MB"
+  },
+  "task_types": {
+    "pdf_to_markdown": {
+      "count": 12,
+      "completed": 10,
+      "failed": 1,
+      "success_rate": 90.9,
+      "avg_processing_time": "5分15秒"
+    },
+    "office_to_pdf": {
+      "count": 8,
+      "completed": 6,
+      "failed": 1,
+      "success_rate": 85.7,
+      "avg_processing_time": "3分20秒"
+    },
+    "office_to_markdown": {
+      "count": 5,
+      "completed": 2,
+      "failed": 0,
+      "success_rate": 100.0,
+      "avg_processing_time": "6分45秒"
+    }
+  },
+  "hourly_distribution": [
+    {
+      "hour": "09:00",
+      "tasks": 3,
+      "completed": 3,
+      "failed": 0
+    },
+    {
+      "hour": "10:00",
+      "tasks": 8,
+      "completed": 6,
+      "failed": 1
+    }
+  ],
+  "performance_metrics": {
+    "queue_wait_time": "45秒",
+    "system_load": "medium",
+    "error_rate": 9.5,
+    "throughput_per_hour": 3.2
+  }
+}
+```
+
+### 7. 删除任务
+
+**端点**: `DELETE /api/tasks/{task_id}`
+
+**描述**: 删除指定的任务记录和相关文件，支持软删除和硬删除
+
+**路径参数**:
+- `task_id` (string): 任务ID
+
+**查询参数**:
+- `delete_files` (boolean, 可选): 是否同时删除S3中的文件，默认为 `false`
+- `force` (boolean, 可选): 是否强制删除（硬删除），默认为 `false`（软删除）
+- `delete_input` (boolean, 可选): 是否删除输入文件，默认为 `false`
+- `delete_output` (boolean, 可选): 是否删除输出文件，默认为 `true`
+
+**curl示例**:
+```bash
+# 仅删除任务记录（软删除）
+curl -X DELETE "http://localhost:8001/api/tasks/pdf_md_20250125_001"
+
+# 删除任务记录和输出文件
+curl -X DELETE "http://localhost:8001/api/tasks/pdf_md_20250125_001?delete_files=true&delete_output=true"
+
+# 完全删除（包括输入和输出文件）
+curl -X DELETE "http://localhost:8001/api/tasks/pdf_md_20250125_001?delete_files=true&delete_input=true&delete_output=true&force=true"
+
+# 仅删除输出文件，保留任务记录
+curl -X DELETE "http://localhost:8001/api/tasks/pdf_md_20250125_001?delete_files=true&delete_input=false&delete_output=true"
+```
+
+**响应示例**:
+```json
+{
+  "message": "任务删除成功",
+  "task_id": "pdf_md_20250125_001",
+  "deletion_type": "soft",
+  "deleted_files": {
+    "input_files": [],
+    "output_files": [
+      "ai-file/output/pdf_md_20250125_001/document.md",
+      "ai-file/output/pdf_md_20250125_001/images/image_001.png",
+      "ai-file/output/pdf_md_20250125_001/images/image_002.png"
+    ]
+  },
+  "files_deleted_count": 3,
+  "storage_freed": "2.5MB",
+  "deleted_at": "2025-01-25T15:30:00Z",
+  "can_restore": true,
+  "restore_deadline": "2025-02-01T15:30:00Z"
+}
+```
+
+### 8. 重新执行任务
+
+**端点**: `POST /api/tasks/{task_id}/retry`
+
+**描述**: 重新执行失败或已完成的任务，支持参数修改
+
+**路径参数**:
+- `task_id` (string): 任务ID
+
+**请求体参数**（可选）:
+- `priority` (string, 可选): 新的优先级（low/normal/high）
+- `parameters` (object, 可选): 修改的处理参数
+- `force_reprocess` (boolean, 可选): 是否强制重新处理已完成的任务，默认为 `false`
+
+**curl示例**:
+```bash
+# 基本重试
+curl -X POST "http://localhost:8001/api/tasks/pdf_md_20250125_001/retry"
+
+# 修改优先级重试
+curl -X POST "http://localhost:8001/api/tasks/pdf_md_20250125_001/retry" \
+  -H "Content-Type: application/json" \
+  -d '{"priority": "high"}'
+
+# 修改参数重试
+curl -X POST "http://localhost:8001/api/tasks/pdf_md_20250125_001/retry" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "priority": "high",
+    "parameters": {
+      "extract_images": false,
+      "ocr_enabled": true,
+      "table_recognition": true
+    },
+    "force_reprocess": true
+  }'
+```
+
+**响应示例**:
+```json
+{
+  "message": "任务重新执行已启动",
+  "original_task_id": "pdf_md_20250125_001",
+  "new_task_id": "pdf_md_20250125_001_retry_1",
+  "status": "pending",
+  "retry_count": 1,
+  "max_retries": 3,
+  "parameters_changed": {
+    "priority": "high",
+    "extract_images": false
+  },
+  "queue_position": 2,
+  "estimated_start_time": "2025-01-25T15:37:00Z",
+  "created_at": "2025-01-25T15:35:00Z"
+}
+```
+
+## 7. 错误处理
+
+### 错误响应格式
+
+所有API错误都遵循统一的响应格式：
+
+```json
+{
+  "error": {
+    "code": "TASK_NOT_FOUND",
+    "message": "指定的任务不存在",
+    "details": {
+      "task_id": "invalid_task_id",
+      "timestamp": "2025-01-25T16:15:00Z",
+      "request_id": "req_12345"
+    }
+  }
+}
+```
+
+### 常见错误码
+
+| 错误码 | HTTP状态码 | 描述 | 解决方案 |
+|--------|------------|------|----------|
+| `INVALID_FILE_FORMAT` | 400 | 不支持的文件格式 | 检查文件格式是否在支持列表中 |
+| `FILE_TOO_LARGE` | 413 | 文件大小超过限制 | 压缩文件或分割处理 |
+| `FILE_NOT_FOUND` | 404 | 文件不存在 | 检查文件路径是否正确 |
+| `TASK_NOT_FOUND` | 404 | 任务不存在 | 检查任务ID是否正确 |
+| `TASK_ALREADY_COMPLETED` | 409 | 任务已完成 | 无需重复处理 |
+| `INVALID_PARAMETERS` | 400 | 参数无效 | 检查请求参数格式和值 |
+| `STORAGE_ERROR` | 500 | 存储服务错误 | 检查MinIO服务状态 |
+| `PROCESSING_ERROR` | 500 | 文档处理错误 | 检查文档内容和处理引擎状态 |
+| `QUEUE_FULL` | 503 | 任务队列已满 | 稍后重试或联系管理员 |
+| `SERVICE_UNAVAILABLE` | 503 | 服务不可用 | 检查服务状态或稍后重试 |
+
+### 错误处理最佳实践
+
+1. **检查HTTP状态码**: 首先检查HTTP响应状态码
+2. **解析错误信息**: 从响应体中获取详细错误信息
+3. **实现重试机制**: 对于临时性错误（5xx），可以实现指数退避重试
+4. **记录错误日志**: 记录完整的错误信息用于调试
+
+```python
+import requests
+import time
+import json
+
+def create_task_with_retry(data, max_retries=3):
+    """创建任务并实现重试机制"""
+    for attempt in range(max_retries):
+        try:
+            response = requests.post(
+                "http://localhost:8001/api/tasks/pdf-to-markdown",
+                json=data,
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            elif response.status_code >= 500:
+                # 服务器错误，可以重试
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt
+                    print(f"服务器错误，{wait_time}秒后重试...")
+                    time.sleep(wait_time)
+                    continue
+            else:
+                # 客户端错误，不重试
+                error_info = response.json().get('error', {})
+                raise Exception(f"API错误: {error_info.get('message', '未知错误')}")
+                
+        except requests.RequestException as e:
+            if attempt < max_retries - 1:
+                wait_time = 2 ** attempt
+                print(f"网络错误，{wait_time}秒后重试: {e}")
+                time.sleep(wait_time)
+                continue
+            raise
+    
+    raise Exception(f"重试{max_retries}次后仍然失败")
+```
+
+## 8. 使用示例
+
+### 完整的文档转换流程
+
+以下是一个完整的PDF转Markdown的示例：
 
 ```bash
-curl "http://localhost:8000/api/statistics"
+#!/bin/bash
+
+# 1. 创建转换任务
+echo "创建PDF转Markdown任务..."
+TASK_RESPONSE=$(curl -s -X POST "http://localhost:8001/api/tasks/pdf-to-markdown" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input_file_path": "ai-file/input/document.pdf",
+    "output_path": "ai-file/output/",
+    "parameters": {
+      "extract_images": true,
+      "table_recognition": true,
+      "formula_recognition": true,
+      "ocr_enabled": true
+    },
+    "priority": "high"
+  }')
+
+# 2. 检查任务创建结果
+if echo "$TASK_RESPONSE" | jq -e '.error' > /dev/null; then
+  echo "任务创建失败:"
+  echo "$TASK_RESPONSE" | jq '.error.message'
+  exit 1
+fi
+
+# 3. 获取任务ID
+TASK_ID=$(echo $TASK_RESPONSE | jq -r '.task_id')
+echo "任务创建成功，ID: $TASK_ID"
+
+# 4. 监控任务状态
+echo "监控任务进度..."
+while true; do
+  TASK_INFO=$(curl -s "http://localhost:8001/api/tasks/$TASK_ID?include_logs=false")
+  STATUS=$(echo $TASK_INFO | jq -r '.status')
+  PROGRESS=$(echo $TASK_INFO | jq -r '.progress // 0')
+  
+  echo "当前状态: $STATUS, 进度: $PROGRESS%"
+  
+  if [ "$STATUS" = "completed" ]; then
+    echo "任务完成！"
+    
+    # 5. 获取输出文件信息
+    echo "输出文件:"
+    echo $TASK_INFO | jq -r '.output_files[] | "- \(.filename): \(.download_url)"'
+    break
+  elif [ "$STATUS" = "failed" ]; then
+    echo "任务失败！"
+    echo "错误信息:"
+    echo $TASK_INFO | jq -r '.error_message // "未知错误"'
+    exit 1
+  fi
+  
+  sleep 5
+done
+
+# 6. 下载结果文件
+echo "下载结果文件..."
+OUTPUT_FILES=$(echo $TASK_INFO | jq -r '.output_files[] | .file_path')
+for file_path in $OUTPUT_FILES; do
+  filename=$(basename "$file_path")
+  echo "下载: $filename"
+  curl -s "http://localhost:8001/api/files/download/$file_path" -o "$filename"
+done
+
+echo "转换完成！"
+```
+
+### 批量处理示例
+
+使用批量API处理多个文档的示例：
+
+```bash
+#!/bin/bash
+
+# 1. 创建批量任务
+echo "创建批量转换任务..."
+BATCH_RESPONSE=$(curl -s -X POST "http://localhost:8001/api/tasks/batch" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "batch_name": "文档批量转换_$(date +%Y%m%d_%H%M%S)",
+    "tasks": [
+      {
+        "task_type": "pdf_to_markdown",
+        "input_file_path": "ai-file/input/document1.pdf",
+        "output_path": "ai-file/output/batch/",
+        "parameters": {
+          "extract_images": true,
+          "table_recognition": true
+        },
+        "priority": "high"
+      },
+      {
+        "task_type": "office_to_pdf",
+        "input_file_path": "ai-file/input/presentation.pptx",
+        "output_path": "ai-file/output/batch/",
+        "parameters": {
+          "orientation": "landscape"
+        },
+        "priority": "normal"
+      },
+      {
+        "task_type": "office_to_markdown",
+        "input_file_path": "ai-file/input/spreadsheet.xlsx",
+        "output_path": "ai-file/output/batch/",
+        "parameters": {
+          "extract_images": false
+        },
+        "priority": "normal"
+      }
+    ]
+  }')
+
+# 2. 获取批次ID
+BATCH_ID=$(echo $BATCH_RESPONSE | jq -r '.batch_id')
+echo "批量任务创建成功，批次ID: $BATCH_ID"
+
+# 3. 监控批次进度
+echo "监控批次进度..."
+while true; do
+  BATCH_INFO=$(curl -s "http://localhost:8001/api/tasks/batch/$BATCH_ID?include_tasks=true")
+  STATUS=$(echo $BATCH_INFO | jq -r '.status')
+  COMPLETION=$(echo $BATCH_INFO | jq -r '.progress.completion_percentage')
+  
+  echo "批次状态: $STATUS, 完成度: $COMPLETION%"
+  
+  # 显示各任务状态
+  echo $BATCH_INFO | jq -r '.tasks[] | "  任务 \(.task_id): \(.status) (\(.progress // 0)%)"'
+  
+  if [ "$STATUS" = "completed" ] || [ "$STATUS" = "failed" ]; then
+    echo "批次处理完成！"
+    break
+  fi
+  
+  sleep 10
+done
+
+# 4. 获取最终结果
+echo "批次处理结果:"
+echo $BATCH_INFO | jq '.progress'
+```
+
+### Python SDK示例
+
+使用Python进行API调用的完整示例：
+
+```python
+import requests
+import time
+import json
+from typing import Dict, List, Optional
+
+class DocumentConverterAPI:
+    """文档转换API客户端"""
+    
+    def __init__(self, base_url: str = "http://localhost:8001"):
+        self.base_url = base_url.rstrip('/')
+        self.session = requests.Session()
+        self.session.timeout = 30
+    
+    def _request(self, method: str, endpoint: str, **kwargs) -> Dict:
+        """统一的请求方法"""
+        url = f"{self.base_url}{endpoint}"
+        response = self.session.request(method, url, **kwargs)
+        
+        if not response.ok:
+            try:
+                error_info = response.json().get('error', {})
+                raise Exception(f"API错误 ({response.status_code}): {error_info.get('message', '未知错误')}")
+            except json.JSONDecodeError:
+                raise Exception(f"HTTP错误 ({response.status_code}): {response.text}")
+        
+        return response.json()
+    
+    def health_check(self) -> Dict:
+        """健康检查"""
+        return self._request('GET', '/api/health')
+    
+    def create_pdf_to_markdown_task(self, input_path: str, output_path: str, 
+                                   parameters: Optional[Dict] = None, 
+                                   priority: str = "normal") -> Dict:
+        """创建PDF转Markdown任务"""
+        data = {
+            "input_file_path": input_path,
+            "output_path": output_path,
+            "priority": priority
+        }
+        if parameters:
+            data["parameters"] = parameters
+        
+        return self._request('POST', '/api/tasks/pdf-to-markdown', json=data)
+    
+    def create_office_to_pdf_task(self, input_path: str, output_path: str,
+                                 parameters: Optional[Dict] = None,
+                                 priority: str = "normal") -> Dict:
+        """创建Office转PDF任务"""
+        data = {
+            "input_file_path": input_path,
+            "output_path": output_path,
+            "priority": priority
+        }
+        if parameters:
+            data["parameters"] = parameters
+        
+        return self._request('POST', '/api/tasks/office-to-pdf', json=data)
+    
+    def create_batch_tasks(self, tasks: List[Dict], batch_name: Optional[str] = None) -> Dict:
+        """创建批量任务"""
+        data = {"tasks": tasks}
+        if batch_name:
+            data["batch_name"] = batch_name
+        
+        return self._request('POST', '/api/tasks/batch', json=data)
+    
+    def get_task_status(self, task_id: str, include_logs: bool = False, 
+                       include_files: bool = True) -> Dict:
+        """获取任务状态"""
+        params = {
+            "include_logs": include_logs,
+            "include_files": include_files
+        }
+        return self._request('GET', f'/api/tasks/{task_id}', params=params)
+    
+    def get_batch_status(self, batch_id: str, include_tasks: bool = True) -> Dict:
+        """获取批次状态"""
+        params = {"include_tasks": include_tasks}
+        return self._request('GET', f'/api/tasks/batch/{batch_id}', params=params)
+    
+    def list_tasks(self, status: Optional[str] = None, task_type: Optional[str] = None,
+                  page: int = 1, size: int = 20) -> Dict:
+        """列出任务"""
+        params = {"page": page, "size": size}
+        if status:
+            params["status"] = status
+        if task_type:
+            params["task_type"] = task_type
+        
+        return self._request('GET', '/api/tasks', params=params)
+    
+    def get_statistics(self, period: str = "today", task_type: Optional[str] = None) -> Dict:
+        """获取统计信息"""
+        params = {"period": period}
+        if task_type:
+            params["task_type"] = task_type
+        
+        return self._request('GET', '/api/tasks/statistics', params=params)
+    
+    def wait_for_completion(self, task_id: str, timeout: int = 1800, 
+                          check_interval: int = 5) -> Dict:
+        """等待任务完成"""
+        start_time = time.time()
+        
+        while time.time() - start_time < timeout:
+            task_info = self.get_task_status(task_id)
+            status = task_info['status']
+            progress = task_info.get('progress', 0)
+            
+            print(f"任务 {task_id}: {status} ({progress}%)")
+            
+            if status == 'completed':
+                return task_info
+            elif status == 'failed':
+                error_msg = task_info.get('error_message', '未知错误')
+                raise Exception(f"任务失败: {error_msg}")
+            
+            time.sleep(check_interval)
+        
+        raise TimeoutError(f"任务超时 ({timeout}秒): {task_id}")
+    
+    def convert_document(self, input_path: str, output_path: str, 
+                        task_type: str = "pdf_to_markdown", 
+                        parameters: Optional[Dict] = None,
+                        priority: str = "normal",
+                        wait: bool = True) -> Dict:
+        """完整的文档转换流程"""
+        
+        # 创建任务
+        if task_type == "pdf_to_markdown":
+            task_result = self.create_pdf_to_markdown_task(
+                input_path, output_path, parameters, priority
+            )
+        elif task_type == "office_to_pdf":
+            task_result = self.create_office_to_pdf_task(
+                input_path, output_path, parameters, priority
+            )
+        else:
+            raise ValueError(f"不支持的任务类型: {task_type}")
+        
+        task_id = task_result['task_id']
+        print(f"任务创建成功: {task_id}")
+        
+        if not wait:
+            return task_result
+        
+        # 等待完成
+        result = self.wait_for_completion(task_id)
+        
+        print("转换完成！")
+        if 'output_files' in result:
+            print("输出文件:")
+            for file_info in result['output_files']:
+                print(f"  - {file_info['filename']}: {file_info.get('download_url', file_info['file_path'])}")
+        
+        return result
+
+# 使用示例
+if __name__ == "__main__":
+    # 初始化客户端
+    api = DocumentConverterAPI()
+    
+    try:
+        # 健康检查
+        health = api.health_check()
+        print(f"服务状态: {health['status']}")
+        
+        # 单个文档转换
+        result = api.convert_document(
+            input_path="ai-file/input/document.pdf",
+            output_path="ai-file/output/",
+            task_type="pdf_to_markdown",
+            parameters={
+                "extract_images": True,
+                "table_recognition": True,
+                "formula_recognition": True,
+                "ocr_enabled": True
+            },
+            priority="high"
+        )
+        
+        print("\n=== 转换成功 ===")
+        print(f"任务ID: {result['task_id']}")
+        print(f"处理时间: {result.get('processing_time', 'N/A')}")
+        
+        # 批量转换示例
+        print("\n=== 批量转换 ===")
+        batch_tasks = [
+            {
+                "task_type": "pdf_to_markdown",
+                "input_file_path": "ai-file/input/doc1.pdf",
+                "output_path": "ai-file/output/batch/",
+                "parameters": {"extract_images": True},
+                "priority": "normal"
+            },
+            {
+                "task_type": "office_to_pdf",
+                "input_file_path": "ai-file/input/presentation.pptx",
+                "output_path": "ai-file/output/batch/",
+                "parameters": {"orientation": "landscape"},
+                "priority": "normal"
+            }
+        ]
+        
+        batch_result = api.create_batch_tasks(
+            tasks=batch_tasks,
+            batch_name="Python批量转换测试"
+        )
+        
+        print(f"批量任务创建成功: {batch_result['batch_id']}")
+        print(f"包含 {batch_result['total_tasks']} 个任务")
+        
+        # 获取统计信息
+        stats = api.get_statistics(period="today")
+        print(f"\n=== 今日统计 ===")
+        print(f"总任务数: {stats['summary']['total_tasks']}")
+        print(f"成功率: {stats['summary']['success_rate']}%")
+        
+    except Exception as e:
+        print(f"操作失败: {e}")
 ```
 
 ## 📊 S3路径规则说明
@@ -443,7 +2147,251 @@ done
 #!/bin/bash
 # 监控任务状态的脚本
 
-echo "=== 任务状态统计 ==="
+echo "开始监控任务状态..."
+while true; do
+    echo "=== $(date) ==="
+    
+    # 获取任务统计
+    STATS=$(curl -s "http://localhost:8001/api/tasks/statistics?period=today")
+    echo "今日任务统计:"
+    echo $STATS | jq '.summary'
+    
+    # 获取正在处理的任务
+    PROCESSING=$(curl -s "http://localhost:8001/api/tasks?status=processing&size=5")
+    echo "正在处理的任务:"
+    echo $PROCESSING | jq -r '.items[] | "任务ID: \(.task_id), 类型: \(.task_type), 进度: \(.progress // 0)%"'
+    
+    # 获取失败的任务
+    FAILED=$(curl -s "http://localhost:8001/api/tasks?status=failed&size=3")
+    FAILED_COUNT=$(echo $FAILED | jq '.total')
+    if [ "$FAILED_COUNT" -gt 0 ]; then
+        echo "最近失败的任务:"
+        echo $FAILED | jq -r '.items[] | "任务ID: \(.task_id), 错误: \(.error_message // "未知错误")"'
+    fi
+    
+    echo "---"
+    sleep 30
+done
+```
+
+## 9. 最佳实践
+
+### 文件上传最佳实践
+
+1. **文件大小控制**
+   - 单个文件建议不超过100MB
+   - 大文件可考虑分页处理或压缩
+   - 使用`multipart/form-data`上传大文件
+
+2. **文件格式选择**
+   - PDF：推荐用于最终文档转换
+   - Office文档：确保版本兼容性（推荐Office 2016+）
+   - 图片：支持PNG、JPG、TIFF等常见格式
+
+3. **路径规划**
+   ```
+   ai-file/
+   ├── input/
+   │   ├── {project_name}/     # 按项目分类
+   │   ├── {date}/            # 按日期分类
+   │   └── {user_id}/         # 按用户分类
+   └── output/
+       ├── {project_name}/
+       └── {date}/
+   ```
+
+### 任务管理最佳实践
+
+1. **优先级设置**
+   - `urgent`: 紧急任务（<5分钟处理）
+   - `high`: 高优先级（<15分钟处理）
+   - `normal`: 普通任务（<30分钟处理）
+   - `low`: 低优先级（<2小时处理）
+
+2. **批量处理策略**
+   - 单批次建议不超过50个任务
+   - 相同类型任务放在同一批次
+   - 设置合理的批次名称便于管理
+
+3. **错误处理策略**
+   ```python
+   # 实现指数退避重试
+   def retry_with_backoff(func, max_retries=3, base_delay=1):
+       for attempt in range(max_retries):
+           try:
+               return func()
+           except Exception as e:
+               if attempt == max_retries - 1:
+                   raise
+               delay = base_delay * (2 ** attempt)
+               time.sleep(delay)
+   ```
+
+### 性能优化建议
+
+1. **并发控制**
+   - 客户端并发请求不超过10个
+   - 使用连接池复用HTTP连接
+   - 实现请求限流避免过载
+
+2. **缓存策略**
+   - 缓存任务状态查询结果（30秒）
+   - 缓存文件列表查询结果（5分钟）
+   - 使用ETag进行条件请求
+
+3. **资源清理**
+   - 定期清理已完成任务的临时文件
+   - 设置文件过期时间（建议30天）
+   - 监控存储空间使用情况
+
+## 10. 常见问题解答
+
+### Q1: 任务一直处于pending状态怎么办？
+
+**A**: 可能的原因和解决方案：
+
+1. **队列满载**: 检查系统负载，等待或提高优先级
+   ```bash
+   curl "http://localhost:8001/api/tasks/statistics" | jq '.queue_status'
+   ```
+
+2. **服务异常**: 检查服务健康状态
+   ```bash
+   curl "http://localhost:8001/api/health"
+   ```
+
+3. **资源不足**: 检查系统资源（CPU、内存、磁盘）
+
+### Q2: 转换质量不理想怎么优化？
+
+**A**: 针对不同问题的优化建议：
+
+1. **表格识别不准确**
+   ```json
+   {
+     "parameters": {
+       "table_recognition": true,
+       "table_min_confidence": 0.8,
+       "table_merge_cells": true
+     }
+   }
+   ```
+
+2. **公式识别错误**
+   ```json
+   {
+     "parameters": {
+       "formula_recognition": true,
+       "formula_output_format": "latex",
+       "formula_min_confidence": 0.9
+     }
+   }
+   ```
+
+3. **图片提取不完整**
+   ```json
+   {
+     "parameters": {
+       "extract_images": true,
+       "image_min_size": 100,
+       "image_quality": "high"
+     }
+   }
+   ```
+
+### Q3: 如何处理大文件转换？
+
+**A**: 大文件处理策略：
+
+1. **分页处理**
+   ```json
+   {
+     "parameters": {
+       "page_range": "1-10",
+       "process_in_chunks": true
+     }
+   }
+   ```
+
+2. **压缩上传**
+   ```bash
+   # 压缩文件后上传
+   gzip large_document.pdf
+   curl -X POST "http://localhost:8001/api/files/upload" \
+     -F "file=@large_document.pdf.gz" \
+     -F "bucket=ai-file" \
+     -F "path=input/compressed/"
+   ```
+
+3. **异步处理**
+   ```python
+   # 不等待完成，定期检查状态
+   result = api.convert_document(
+       input_path="ai-file/input/large_file.pdf",
+       output_path="ai-file/output/",
+       wait=False  # 不等待完成
+   )
+   task_id = result['task_id']
+   ```
+
+### Q4: 如何监控系统性能？
+
+**A**: 监控关键指标：
+
+1. **任务统计**
+   ```bash
+   # 获取详细统计信息
+   curl "http://localhost:8001/api/tasks/statistics?period=today&group_by=hour" | jq
+   ```
+
+2. **系统健康**
+   ```bash
+   # 检查各组件状态
+   curl "http://localhost:8001/api/health" | jq '.components'
+   ```
+
+3. **性能指标**
+   ```bash
+   # 获取系统信息
+   curl "http://localhost:8001/api/system/info" | jq '.performance'
+   ```
+
+### Q5: 如何备份和恢复数据？
+
+**A**: 数据备份策略：
+
+1. **MinIO数据备份**
+   ```bash
+   # 使用mc工具备份
+   mc mirror minio/ai-file /backup/minio-data/
+   ```
+
+2. **数据库备份**
+   ```bash
+   # SQLite备份
+   cp tasks.db /backup/tasks_$(date +%Y%m%d).db
+   ```
+
+3. **配置备份**
+   ```bash
+   # 备份配置文件
+   tar -czf config_backup.tar.gz .env config/
+   ```
+
+---
+
+## 📞 技术支持
+
+如果您在使用过程中遇到问题，可以通过以下方式获取帮助：
+
+1. **查看日志**: 检查应用日志获取详细错误信息
+2. **健康检查**: 使用`/api/health`端点检查系统状态
+3. **文档参考**: 查阅本文档和API文档
+4. **社区支持**: 在项目仓库提交Issue
+
+---
+
+*最后更新时间: 2025-01-25*echo "=== 任务状态统计 ==="
 for status in pending processing completed failed; do
     count=$(curl -s "http://localhost:8000/api/tasks/list?status=$status" | jq '.tasks | length')
     echo "$status: $count 个任务"

@@ -667,3 +667,115 @@ async def retry_failed_tasks(
     except Exception as e:
         logger.error(f"Failed to retry failed tasks: {e}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@router.get("/download/{task_id}/{file_name:path}")
+async def download_file(
+    task_id: str, 
+    file_name: str,
+    processor: EnhancedTaskProcessor = Depends(get_task_processor)
+):
+    """
+    下载转换后的文件（代理MinIO下载）
+    
+    Args:
+        task_id: 任务ID
+        file_name: 文件名
+    
+    Returns:
+        文件下载响应
+    """
+    try:
+        # URL解码文件名
+        from urllib.parse import unquote
+        decoded_file_name = unquote(file_name)
+        
+        # 获取任务信息
+        task = await processor.db_manager.get_task(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        
+        # 检查任务是否有可下载的文件（不限制必须是completed状态）
+        if not task.s3_urls:
+            raise HTTPException(status_code=404, detail="No files available for download")
+        
+        # 从s3_urls中查找匹配的文件
+        s3_urls = task.s3_urls or []
+        target_file = None
+        
+        # 添加调试信息（避免中文字符导致编码问题）
+        logger.info(f"Original file_name length: {len(file_name)}")
+        logger.info(f"Decoded file_name length: {len(decoded_file_name)}")
+        logger.info(f"Available s3_urls count: {len(s3_urls)}")
+        
+        for i, s3_url in enumerate(s3_urls):
+            logger.info(f"Checking s3_url {i}: length {len(s3_url)}")
+            # 尝试匹配原始文件名和解码后的文件名
+            if file_name in s3_url or decoded_file_name in s3_url:
+                target_file = s3_url
+                logger.info(f"Found matching file at index {i}")
+                break
+        
+        if not target_file:
+            logger.error(f"File not found. Requested file length: {len(file_name)}, decoded length: {len(decoded_file_name)}, available URLs count: {len(s3_urls)}")
+            raise HTTPException(status_code=404, detail="File not found")
+        
+        # 解析S3 URL获取bucket和key
+        # 假设格式为: s3://bucket/path/to/file
+        if target_file.startswith('s3://'):
+            parts = target_file[5:].split('/', 1)
+            if len(parts) != 2:
+                raise HTTPException(status_code=400, detail="Invalid S3 URL format")
+            
+            bucket_name = parts[0]
+            s3_key = parts[1]
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported file URL format")
+        
+        # 使用S3DownloadService下载文件数据
+        from services.s3_download_service import S3DownloadService
+        s3_service = S3DownloadService()
+        
+        download_result = await s3_service.download_file_data(
+            bucket_name=bucket_name,
+            s3_key=s3_key
+        )
+        
+        if not download_result.get('success'):
+            raise HTTPException(status_code=500, detail=f"Download failed: {download_result.get('error')}")
+        
+        # 获取文件数据和内容类型
+        file_data = download_result['data']
+        content_type = download_result.get('content_type', 'application/octet-stream')
+        
+        # 返回文件响应
+        from fastapi.responses import StreamingResponse
+        from urllib.parse import quote
+        import os
+        import re
+        import io
+        
+        # 获取文件名（不包含路径）
+        safe_filename = os.path.basename(decoded_file_name)
+        
+        # 创建ASCII安全的文件名用于Content-Disposition
+        # 移除或替换非ASCII字符
+        ascii_filename = re.sub(r'[^\x00-\x7F]+', '_', safe_filename)
+        
+        # 创建字节流
+        file_stream = io.BytesIO(file_data)
+        
+        return StreamingResponse(
+            io.BytesIO(file_data),
+            media_type=content_type,
+            headers={
+                "Content-Disposition": f"attachment; filename={ascii_filename}",
+                "Content-Length": str(len(file_data))
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error downloading file: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")

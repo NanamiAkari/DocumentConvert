@@ -1,149 +1,103 @@
 # 文档转换服务项目概览
 
-本文档提供文档转换服务的完整项目概览，包括系统架构、核心组件、部署指南、环境配置和开发说明。
+基于FastAPI的高性能异步文档处理系统，支持PDF、Office文档等多种格式的智能转换。
 
 ## 📋 项目简介
 
-文档转换服务是一个基于FastAPI的高性能异步文档处理系统，支持PDF、Office文档等多种格式的智能转换。该服务集成了MinerU 2.0 AI技术和LibreOffice传统文档处理工具，系统采用队列驱动的架构设计，具备高并发处理能力、智能优先级调度和完整的S3存储集成。
+文档转换服务集成MinerU 2.0 AI技术和LibreOffice处理工具，采用队列驱动架构，具备高并发处理能力和完整的S3存储集成。
 
 ### 核心特性
-- 🚀 **高性能异步处理**：基于asyncio的非阻塞任务处理
-- 📊 **智能优先级调度**：支持高、中、低三级优先级队列
-- 🔄 **多格式转换支持**：基于MinerU 2.0的PDF↔Markdown、LibreOffice的Office→PDF、Office→Markdown
-- 💾 **完整S3集成**：支持MinIO和AWS S3存储
-- 🔍 **实时监控**：提供详细的任务状态和系统健康检查
-- 🛡️ **容错机制**：自动重试、错误恢复和资源清理
-- 🌐 **Web界面**：Gradio Web界面，支持拖拽上传和在线转换
-- 🤖 **AI增强**：集成MinerU 2.0，支持GPU加速和中文OCR识别
+- 🚀 **异步处理**：基于asyncio的高性能任务处理
+- 📊 **优先级调度**：支持三级优先级队列
+- 🔄 **多格式转换**：PDF↔Markdown、Office→PDF/Markdown
+- 💾 **S3存储**：支持MinIO和AWS S3
+- 🔍 **实时监控**：任务状态和健康检查
+- 🌐 **Web界面**：Gradio界面，支持拖拽上传
+- 🤖 **AI增强**：MinerU 2.0，支持GPU加速和OCR
 
-## 🛠️ 技术栈详解
+## 🛠️ 技术栈
 
 ### 核心框架
-- **FastAPI 0.104+**: 现代异步Web框架，提供自动API文档生成
+- **FastAPI**: 异步Web框架，自动API文档
 - **Python 3.8+**: 主要开发语言
-- **asyncio**: 异步编程核心，支持高并发处理
-- **SQLAlchemy + aiosqlite**: 异步ORM框架和SQLite数据库
-- **Gradio 4.44.0**: Web界面框架，提供文件上传和转换功能
+- **SQLAlchemy + aiosqlite**: 异步ORM和SQLite数据库
+- **Gradio**: Web界面框架
 
-### 文档处理引擎
-- **MinerU 2.0**: AI驱动的PDF解析引擎，支持GPU加速和中文OCR识别
-- **LibreOffice**: Office文档转换引擎（headless模式）
-- **Pillow**: 图像处理库，用于图片提取和处理
-- **PyPDF2**: PDF操作库，用于基础PDF处理
+### 文档处理
+- **MinerU 2.0**: AI驱动PDF解析，支持GPU加速
+- **LibreOffice**: Office文档转换（headless模式）
 
 ### 存储和网络
-- **MinIO**: S3兼容对象存储服务
-- **boto3**: AWS SDK，用于S3操作
-- **httpx**: 异步HTTP客户端
-- **requests**: 同步HTTP客户端
-- **S3兼容存储**: 支持AWS S3、MinIO、阿里云OSS等
-
-### 监控和日志
-- **structlog**: 结构化日志记录，支持JSON格式输出
-- **Prometheus**: 指标收集（可选）
-- **Grafana**: 监控面板（可选）
-- **健康检查**: 自定义健康检查端点，支持服务状态监控
-- **错误跟踪**: 详细的错误日志和堆栈跟踪
-
-### 安全和加密
-- **JWT**: 身份认证（可选）
-- **Fernet**: 对称加密，用于敏感数据保护
-- **bcrypt**: 密码哈希（可选）
-- **CORS**: 跨域资源共享配置
-- **环境变量**: 敏感配置信息保护
+- **MinIO/AWS S3**: 对象存储服务
+- **boto3**: S3操作SDK
+- **httpx/requests**: HTTP客户端
 
 ## 🏗️ 系统架构
 
-### 整体架构图
+### 整体架构
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Web Client    │    │   API Client    │    │  Mobile App     │
-└─────────┬───────┘    └─────────┬───────┘    └─────────┬───────┘
-          │                      │                      │
-          └──────────────────────┼──────────────────────┘
-                                 │
-                    ┌─────────────┴─────────────┐
-                    │     FastAPI Server       │
-                    │   (Port: 8000/33081)     │
-                    └─────────────┬─────────────┘
-                                  │
-                    ┌─────────────┴─────────────┐
-                    │    Task Processor         │
-                    │  (Async Queue System)     │
-                    └─────────────┬─────────────┘
-                                  │
-        ┌─────────────────────────┼─────────────────────────┐
-        │                         │                         │
-┌───────┴────────┐    ┌──────────┴──────────┐    ┌────────┴────────┐
-│   SQLite DB    │    │     MinIO S3        │    │  File System    │
-│  (Task Queue)  │    │   (File Storage)    │    │  (Workspace)    │
-└────────────────┘    └─────────────────────┘    └─────────────────┘
-```
-
-### 核心组件架构
-
-#### 1. API层 (FastAPI)
-- **路由管理**：任务创建、查询、状态监控
-- **请求验证**：参数校验、文件类型检查
-- **响应格式化**：统一的JSON响应格式
-- **错误处理**：全局异常捕获和处理
-- **Web界面**：集成Gradio界面，提供用户友好的文件上传和转换功能
-
-#### 2. 任务处理层 (Task Processor)
-- **队列管理器**：多优先级队列调度
-- **任务执行器**：异步任务处理引擎，集成MinerU 2.0和LibreOffice
-- **资源管理器**：工作空间和临时文件管理，支持GPU内存自动清理
-- **状态跟踪器**：实时任务状态更新
-- **转换引擎**：MinerU 2.0用于PDF智能解析，LibreOffice用于Office文档处理
-
-#### 3. 存储层 (Storage Layer)
-- **数据库**：SQLite任务队列和状态存储
-- **文件存储**：MinIO S3兼容存储
-- **工作空间**：本地临时文件处理区域
-
-## 🔄 队列系统架构
-
-### 队列层次结构
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Task Queue System                        │
-├─────────────────────────────────────────────────────────────┤
-│  Fetch Queue (文件下载)                                      │
-│  ├── High Priority Queue                                    │
-│  ├── Normal Priority Queue                                  │
-│  └── Low Priority Queue                                     │
-├─────────────────────────────────────────────────────────────┤
-│  Processing Queue (文档转换)                                 │
-│  ├── High Priority Queue                                    │
-│  ├── Normal Priority Queue                                  │
-│  └── Low Priority Queue                                     │
-├─────────────────────────────────────────────────────────────┤
-│  Update Queue (状态更新)                                     │
-├─────────────────────────────────────────────────────────────┤
-│  Cleanup Queue (资源清理)                                    │
-├─────────────────────────────────────────────────────────────┤
-│  Callback Queue (回调通知)                                   │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────┐    ┌─────────────────┐
+│   Web Client    │    │   API Client    │
+└─────────┬───────┘    └─────────┬───────┘
+          │                      │
+          └──────────┬───────────┘
+                     │
+        ┌────────────┴────────────┐
+        │     FastAPI Server     │
+        └────────────┬────────────┘
+                     │
+        ┌────────────┴────────────┐
+        │    Task Processor       │
+        │  (Async Queue System)   │
+        └────────────┬────────────┘
+                     │
+    ┌────────────────┼────────────────┐
+    │                │                │
+┌───┴────┐    ┌──────┴──────┐    ┌────┴────┐
+│SQLite  │    │   MinIO S3  │    │  File   │
+│   DB   │    │   Storage   │    │ System  │
+└────────┘    └─────────────┘    └─────────┘
 ```
 
-### 队列处理流程
-1. **任务创建** → Fetch Queue (按优先级分配)
-2. **文件下载** → Processing Queue (转换处理)
-3. **文档转换** → Update Queue (状态更新)
-4. **结果上传** → Cleanup Queue (资源清理)
-5. **任务完成** → Callback Queue (通知回调)
+### 核心组件
+
+#### 1. API层
+- 任务创建、查询、状态监控
+- 请求验证和响应格式化
+- Gradio Web界面集成
+
+#### 2. 任务处理层
+- 多优先级队列调度
+- 异步任务执行引擎
+- MinerU 2.0和LibreOffice集成
+
+#### 3. 存储层
+- SQLite任务状态存储
+- MinIO S3文件存储
+- 本地临时文件处理
+
+## 🔄 队列系统
+
+### 队列结构
+- **Fetch Queue**: 文件下载（高/中/低优先级）
+- **Processing Queue**: 文档转换（高/中/低优先级）
+- **Update Queue**: 状态更新
+- **Cleanup Queue**: 资源清理
+- **Callback Queue**: 回调通知
+
+### 处理流程
+任务创建 → 文件下载 → 文档转换 → 状态更新 → 资源清理 → 任务完成
 
 ## 🚀 部署指南
 
 ### 环境要求
-- **操作系统**：Linux/macOS/Windows
-- **Python版本**：3.8+
-- **Docker版本**：20.10+
-- **内存要求**：最小8GB，推荐16GB+（支持GPU加速需要更多内存）
-- **磁盘空间**：最小20GB，推荐50GB+（用于存储转换文件和模型）
-- **GPU支持（可选）**：NVIDIA GPU + CUDA 11.0+，用于MinerU加速
+- Python 3.8+
+- Docker 20.10+
+- 内存：8GB+（推荐16GB+）
+- 磁盘：20GB+
+- GPU（可选）：NVIDIA GPU + CUDA 11.0+
 
-### 快速部署步骤
+### 快速部署
 
 #### 1. 环境准备
 ```bash
@@ -151,52 +105,24 @@
 git clone <repository-url>
 cd document-conversion-service
 
-# 创建数据目录
-mkdir -p ./data/{database,logs,workspace,temp,minio}
-
-# 设置权限
-chmod -R 755 ./data
-
-# 创建虚拟环境（推荐）
+# 创建虚拟环境
 python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# 或
-venv\Scripts\activate     # Windows
+source venv/bin/activate
 ```
 
-#### 2. 启动MinIO存储服务
+#### 2. 启动MinIO
 ```bash
-# 启动MinIO容器
 docker compose up -d minio
-
-# 等待服务启动
-sleep 10
-
-# 创建存储桶
 docker exec minio mc mb minio/ai-file
-
-# 验证存储桶创建
-docker exec minio mc ls minio/
 ```
 
-#### 3. 安装Python依赖
+#### 3. 安装依赖
 ```bash
-# 使用国内镜像源安装依赖（推荐）
 pip install -i https://mirrors.cloud.tencent.com/pypi/simple -r requirements.txt
-
-# 或使用默认源
-pip install -r requirements.txt
-
-# 验证关键依赖
-python -c "import fastapi, aiosqlite, sqlalchemy; print('Dependencies OK')"
-
-# 如果需要GPU支持，安装CUDA相关依赖
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
 ```
 
-#### 4. 配置环境变量
+#### 4. 配置环境
 ```bash
-# 创建环境配置文件
 cat > .env << EOF
 # MinIO配置
 MINIO_ENDPOINT=localhost:9000
@@ -204,299 +130,47 @@ MINIO_ACCESS_KEY=minioadmin
 MINIO_SECRET_KEY=minioadmin
 MINIO_SECURE=false
 DEFAULT_BUCKET=ai-file
-
-# 服务配置
 API_HOST=0.0.0.0
 API_PORT=8000
 GRADIO_HOST=0.0.0.0
 GRADIO_PORT=7860
-
-# GPU配置（可选）
-CUDA_VISIBLE_DEVICES=0
 EOF
 ```
 
-#### 5. 启动文档转换服务
+#### 5. 启动服务
 ```bash
-# 方法1: 启动API服务
+# 启动API服务
 python main.py
 
-# 方法2: 使用uvicorn启动API服务
-uvicorn main:app --host 0.0.0.0 --port 8000 --log-level info
-
-# 方法3: 启动Gradio Web界面（新终端）
+# 启动Web界面（新终端）
 python gradio_app.py
-
-# 方法4: 同时启动多个服务（推荐用于开发）
-# 终端1: API服务
-python main.py &
-# 终端2: Gradio界面
-python gradio_app.py &
 ```
 
 #### 6. 验证部署
 ```bash
 # 健康检查
-curl -f http://localhost:8000/health
+curl http://localhost:8000/health
 
-# API文档访问
-open http://localhost:8000/docs  # Mac
-# 或在浏览器中访问 http://localhost:8000/docs
-
-# Gradio Web界面访问
-open http://localhost:7860  # Mac
-# 或在浏览器中访问 http://localhost:7860
-
-# MinIO控制台访问
-open http://localhost:9001  # Mac
-# 或在浏览器中访问 http://localhost:9001
-# 用户名: minioadmin, 密码: minioadmin
-
-# 创建测试任务
-curl -X POST "http://localhost:8000/api/tasks/create" \
-  -F "task_type=pdf_to_markdown" \
-  -F "bucket_name=ai-file" \
-  -F "file_path=test/sample.pdf" \
-  -F "priority=normal" \
-  -F "platform=test"
+# 访问服务
+# API文档: http://localhost:8000/docs
+# Web界面: http://localhost:7860
+# MinIO控制台: http://localhost:9001
 ```
 
-### 生产环境部署
+### Docker部署
 
-#### Docker Compose部署
-
-##### 1. 准备docker-compose.yml
-```yaml
-version: '3.8'
-
-services:
-  # MinIO对象存储
-  minio:
-    image: minio/minio:latest
-    container_name: minio
-    ports:
-      - "9003:9000"  # API端口
-      - "9004:9001"  # 控制台端口
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
-    volumes:
-      - minio_data:/data
-      - ./minio-config:/root/.minio
-    command: server /data --address ":9000" --console-address ":9001"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 30s
-      timeout: 20s
-      retries: 3
-    networks:
-      - app-network
-
-  # 文档转换API服务
-  document-converter-api:
-    build: 
-      context: .
-      dockerfile: Dockerfile
-    container_name: document-converter-api
-    ports:
-      - "8001:8001"
-    environment:
-      - MINIO_ENDPOINT=minio:9000
-      - MINIO_ACCESS_KEY=minioadmin
-      - MINIO_SECRET_KEY=minioadmin
-      - MINIO_SECURE=false
-      - DATABASE_URL=sqlite+aiosqlite:///./data/document_converter.db
-      - API_HOST=0.0.0.0
-      - API_PORT=8001
-      - DEFAULT_BUCKET=ai-file
-    volumes:
-      - app_data:/app/data
-      - ./logs:/app/logs
-    depends_on:
-      - minio
-    restart: unless-stopped
-    networks:
-      - app-network
-    deploy:
-      resources:
-        limits:
-          memory: 4G
-          cpus: '2.0'
-        reservations:
-          memory: 2G
-          cpus: '1.0'
-
-  # Gradio Web界面
-  document-converter-web:
-    build: 
-      context: .
-      dockerfile: Dockerfile.gradio
-    container_name: document-converter-web
-    ports:
-      - "7860:7860"
-    environment:
-      - API_BASE_URL=http://document-converter-api:8001
-      - GRADIO_HOST=0.0.0.0
-      - GRADIO_PORT=7860
-    depends_on:
-      - document-converter-api
-    restart: unless-stopped
-    networks:
-      - app-network
-
-  # Nginx反向代理（可选）
-  nginx:
-    image: nginx:alpine
-    container_name: nginx-proxy
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./ssl:/etc/nginx/ssl:ro
-    depends_on:
-      - document-converter-api
-      - document-converter-web
-    restart: unless-stopped
-    networks:
-      - app-network
-
-volumes:
-  minio_data:
-    driver: local
-  app_data:
-    driver: local
-
-networks:
-  app-network:
-    driver: bridge
-```
-
-##### 2. 创建Dockerfile
-```dockerfile
-# Dockerfile
-FROM python:3.9-slim
-
-# 安装系统依赖
-RUN apt-get update && apt-get install -y \
-    curl \
-    libreoffice \
-    fonts-wqy-zenhei \
-    fonts-wqy-microhei \
-    && rm -rf /var/lib/apt/lists/*
-
-# 设置工作目录
-WORKDIR /app
-
-# 复制依赖文件
-COPY requirements.txt .
-
-# 安装Python依赖
-RUN pip install --no-cache-dir -i https://mirrors.cloud.tencent.com/pypi/simple -r requirements.txt
-
-# 复制应用代码
-COPY . .
-
-# 创建数据目录
-RUN mkdir -p /app/data /app/logs
-
-# 暴露端口
-EXPOSE 8001
-
-# 启动命令
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8001"]
-```
-
-##### 3. 创建Gradio Dockerfile
-```dockerfile
-# Dockerfile.gradio
-FROM python:3.9-slim
-
-# 安装系统依赖
-RUN apt-get update && apt-get install -y \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-# 设置工作目录
-WORKDIR /app
-
-# 复制依赖文件
-COPY requirements.txt .
-
-# 安装Python依赖
-RUN pip install --no-cache-dir -i https://mirrors.cloud.tencent.com/pypi/simple -r requirements.txt
-
-# 复制Gradio应用
-COPY gradio_app.py .
-COPY utils/ ./utils/
-
-# 暴露端口
-EXPOSE 7860
-
-# 启动命令
-CMD ["python", "gradio_app.py"]
-```
-
-##### 4. 启动服务
+使用Docker Compose一键部署：
 ```bash
-# 构建并启动所有服务
 docker-compose up -d --build
-
-# 查看服务状态
-docker-compose ps
-
-# 查看日志
-docker-compose logs -f
-
-# 查看特定服务日志
-docker-compose logs -f document-converter-api
-
-# 重启服务
-docker-compose restart document-converter-api
-
-# 停止所有服务
-docker-compose down
-
-# 停止并删除数据卷
-docker-compose down -v
 ```
 
-##### 5. 验证部署
-```bash
-# 等待服务启动
-sleep 60
 
-# 检查所有服务状态
-docker-compose ps
 
-# 检查API健康状态
-curl http://localhost:8001/health
 
-# 访问API文档
-open http://localhost:8001/docs
 
-# 访问Gradio Web界面
-open http://localhost:7860
+### Kubernetes部署
 
-# 访问MinIO控制台
-open http://localhost:9004
-# 用户名: minioadmin, 密码: minioadmin
-
-# 创建测试任务
-curl -X POST "http://localhost:8001/api/tasks/create" \
-  -F "task_type=pdf_to_markdown" \
-  -F "bucket_name=ai-file" \
-  -F "file_path=test/sample.pdf" \
-  -F "priority=normal" \
-  -F "platform=docker"
-
-# 查看任务状态
-curl "http://localhost:8001/api/tasks/list?limit=10"
-```
-
-#### Kubernetes部署
-
-##### 1. 准备Kubernetes配置文件
+#### 1. 创建Kubernetes配置文件
 
 **namespace.yaml**
 ```yaml
@@ -504,9 +178,6 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: document-converter
-  labels:
-    app: document-converter
-    version: v1.0.0
 ```
 
 **deployment.yaml**
@@ -517,33 +188,31 @@ metadata:
   name: document-conversion-service
   namespace: document-converter
 spec:
-  replicas: 3
+  replicas: 2
   selector:
     matchLabels:
-      app: document-service
+      app: document-conversion-service
   template:
     metadata:
       labels:
-        app: document-service
+        app: document-conversion-service
     spec:
       containers:
-      - name: document-service
+      - name: document-converter
         image: document-conversion-service:latest
         ports:
-        - containerPort: 8001
+        - containerPort: 8000
         env:
         - name: MINIO_ENDPOINT
           value: "minio-service:9000"
-        - name: MINIO_ACCESS_KEY
+        - name: DATABASE_URL
           valueFrom:
             secretKeyRef:
-              name: minio-secret
-              key: access-key
-        - name: MINIO_SECRET_KEY
-          valueFrom:
-            secretKeyRef:
-              name: minio-secret
-              key: secret-key
+              name: app-config
+              key: database-url
+        volumeMounts:
+        - name: app-data
+          mountPath: /app/data
         resources:
           requests:
             memory: "2Gi"
@@ -551,9 +220,6 @@ spec:
           limits:
             memory: "4Gi"
             cpu: "2000m"
-        volumeMounts:
-        - name: app-data
-          mountPath: /app/data
       volumes:
       - name: app-data
         persistentVolumeClaim:
@@ -567,30 +233,19 @@ kind: Service
 metadata:
   name: document-conversion-service
   namespace: document-converter
-  labels:
-    app: document-conversion-service
 spec:
   selector:
     app: document-conversion-service
   ports:
-  - name: http
-    port: 80
-    targetPort: 8001
-    protocol: TCP
-  - name: https
-    port: 443
-    targetPort: 8001
-    protocol: TCP
+  - port: 80
+    targetPort: 8000
   type: LoadBalancer
-  sessionAffinity: ClientIP
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: minio-service
   namespace: document-converter
-  labels:
-    app: minio
 spec:
   selector:
     app: minio
@@ -598,148 +253,16 @@ spec:
   - name: api
     port: 9000
     targetPort: 9000
-    protocol: TCP
   - name: console
     port: 9001
     targetPort: 9001
-    protocol: TCP
-  type: ClusterIP
+  type: LoadBalancer
 ```
 
-**pvc.yaml**
-```yaml
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: app-data-pvc
-  namespace: document-converter
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 50Gi
-  storageClassName: fast-ssd
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: minio-data-pvc
-  namespace: document-converter
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 100Gi
-  storageClassName: fast-ssd
-```
-
-**secret.yaml**
-```yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: minio-secret
-  namespace: document-converter
-type: Opaque
-data:
-  access-key: bWluaW9hZG1pbg==  # minioadmin (base64)
-  secret-key: bWluaW9hZG1pbg==  # minioadmin (base64)
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: app-config
-  namespace: document-converter
-type: Opaque
-stringData:
-  database-url: "sqlite+aiosqlite:///./data/document_converter.db"
-  api-host: "0.0.0.0"
-  api-port: "8001"
-  default-bucket: "ai-file"
-```
-
-**minio-deployment.yaml**
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: minio
-  namespace: document-converter
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: minio
-  template:
-    metadata:
-      labels:
-        app: minio
-    spec:
-      containers:
-      - name: minio
-        image: minio/minio:latest
-        args:
-        - server
-        - /data
-        - --address
-        - ":9000"
-        - --console-address
-        - ":9001"
-        ports:
-        - containerPort: 9000
-        - containerPort: 9001
-        env:
-        - name: MINIO_ROOT_USER
-          valueFrom:
-            secretKeyRef:
-              name: minio-secret
-              key: access-key
-        - name: MINIO_ROOT_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: minio-secret
-              key: secret-key
-        volumeMounts:
-        - name: minio-data
-          mountPath: /data
-        resources:
-          requests:
-            memory: "1Gi"
-            cpu: "500m"
-          limits:
-            memory: "2Gi"
-            cpu: "1000m"
-        livenessProbe:
-          httpGet:
-            path: /minio/health/live
-            port: 9000
-          initialDelaySeconds: 30
-          periodSeconds: 30
-        readinessProbe:
-          httpGet:
-            path: /minio/health/ready
-            port: 9000
-          initialDelaySeconds: 10
-          periodSeconds: 10
-      volumes:
-      - name: minio-data
-        persistentVolumeClaim:
-          claimName: minio-data-pvc
-```
-
-##### 2. 部署到Kubernetes
+#### 2. 部署到Kubernetes
 ```bash
 # 创建命名空间
 kubectl apply -f namespace.yaml
-
-# 创建存储和配置
-kubectl apply -f pvc.yaml
-kubectl apply -f secret.yaml
-
-# 部署MinIO
-kubectl apply -f minio-deployment.yaml
 
 # 部署应用服务
 kubectl apply -f deployment.yaml
@@ -747,136 +270,6 @@ kubectl apply -f service.yaml
 
 # 查看部署状态
 kubectl get all -n document-converter
-
-# 查看Pod状态
-kubectl get pods -n document-converter -w
-
-# 查看服务状态
-kubectl get services -n document-converter
-
-# 查看PVC状态
-kubectl get pvc -n document-converter
-
-# 查看应用日志
-kubectl logs -f deployment/document-conversion-service -n document-converter
-
-# 查看MinIO日志
-kubectl logs -f deployment/minio -n document-converter
-```
-
-##### 3. 配置Ingress（可选）
-```yaml
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: document-converter-ingress
-  namespace: document-converter
-  annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
-    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
-    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
-    cert-manager.io/cluster-issuer: "letsencrypt-prod"
-spec:
-  tls:
-  - hosts:
-    - api.document-converter.example.com
-    - minio.document-converter.example.com
-    secretName: document-converter-tls
-  rules:
-  - host: api.document-converter.example.com
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: document-conversion-service
-            port:
-              number: 80
-  - host: minio.document-converter.example.com
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: minio-service
-            port:
-              number: 9001
-```
-
-##### 4. 配置HPA（水平自动扩缩容）
-```yaml
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
-metadata:
-  name: document-converter-hpa
-  namespace: document-converter
-spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: document-conversion-service
-  minReplicas: 2
-  maxReplicas: 10
-  metrics:
-  - type: Resource
-    resource:
-      name: cpu
-      target:
-        type: Utilization
-        averageUtilization: 70
-  - type: Resource
-    resource:
-      name: memory
-      target:
-        type: Utilization
-        averageUtilization: 80
-  behavior:
-    scaleDown:
-      stabilizationWindowSeconds: 300
-      policies:
-      - type: Percent
-        value: 10
-        periodSeconds: 60
-    scaleUp:
-      stabilizationWindowSeconds: 60
-      policies:
-      - type: Percent
-        value: 50
-        periodSeconds: 60
-```
-
-##### 5. 验证Kubernetes部署
-```bash
-# 等待所有Pod就绪
-kubectl wait --for=condition=ready pod -l app=document-conversion-service -n document-converter --timeout=300s
-
-# 检查服务健康状态
-kubectl port-forward service/document-conversion-service 8080:80 -n document-converter &
-curl http://localhost:8080/health
-
-# 获取外部访问地址
-kubectl get ingress -n document-converter
-
-# 或者使用LoadBalancer IP
-kubectl get service document-conversion-service -n document-converter
-
-# 创建测试任务
-curl -X POST "http://your-external-ip/api/tasks/create" \
-  -F "task_type=pdf_to_markdown" \
-  -F "bucket_name=ai-file" \
-  -F "file_path=test/sample.pdf" \
-  -F "priority=normal" \
-  -F "platform=kubernetes"
-
-# 监控Pod资源使用情况
-kubectl top pods -n document-converter
-
-# 查看HPA状态
-kubectl get hpa -n document-converter
 ```
 
 ## ⚙️ 环境配置

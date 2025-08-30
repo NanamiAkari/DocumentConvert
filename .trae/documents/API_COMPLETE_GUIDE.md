@@ -12,716 +12,221 @@
 - **API文档**: `http://localhost:8001/docs` (Swagger UI)
 - **ReDoc文档**: `http://localhost:8001/redoc`
 
-## 🚀 服务启动
+## 🚀 快速启动
 
-### 1. 启动MinIO服务
+### 1. 启动服务
 ```bash
-# 方法1: 使用Docker启动MinIO
-docker run -d \
-  --name minio \
-  -p 9003:9000 \
-  -p 9004:9001 \
-  -e MINIO_ROOT_USER=minioadmin \
-  -e MINIO_ROOT_PASSWORD=minioadmin \
-  -v $(pwd)/minio-data:/data \
-  minio/minio server /data --address ":9000" --console-address ":9001"
-
-# 方法2: 直接运行MinIO（推荐开发环境）
-MINIO_ROOT_USER=minioadmin MINIO_ROOT_PASSWORD=minioadmin \
-minio server ./minio-data --address ":9003" --console-address ":9004"
-
-# 方法3: 使用Docker Compose
+# 启动MinIO
 docker-compose up -d minio
-```
 
-### 2. 创建数据目录和配置
-```bash
-# 创建必要的目录
-mkdir -p minio-data data/input data/output data/temp logs
-
-# 设置权限
-chmod -R 755 minio-data/ data/ logs/
-
-# 创建环境配置文件（如果不存在）
-cat > .env << EOF
-# MinIO配置
-MINIO_ENDPOINT=localhost:9003
-MINIO_ACCESS_KEY=minioadmin
-MINIO_SECRET_KEY=minioadmin
-MINIO_SECURE=false
-DEFAULT_BUCKET=ai-file
-
-# API服务配置
-API_HOST=0.0.0.0
-API_PORT=8001
-
-# 数据库配置
-DATABASE_URL=sqlite+aiosqlite:///./document_converter.db
-EOF
-```
-
-### 3. 创建S3存储桶
-```bash
-# 方法1: 使用mc客户端创建存储桶
-mc alias set local http://localhost:9003 minioadmin minioadmin
+# 创建存储桶
+mc alias set local http://localhost:9000 minioadmin minioadmin
 mc mb local/ai-file
-mc mb local/test-bucket
-mc mb local/uploads
-mc mb local/outputs
 
-# 设置存储桶策略（允许公共读取）
-mc anonymous set public local/ai-file
-mc anonymous set public local/outputs
-
-# 方法2: 通过MinIO控制台创建
-# 访问 http://localhost:9004
-# 用户名: minioadmin, 密码: minioadmin
-# 手动创建存储桶: ai-file, test-bucket, uploads, outputs
-
-# 方法3: 使用Python脚本自动创建
-python -c "
-import boto3
-from botocore.client import Config
-
-client = boto3.client('s3',
-    endpoint_url='http://localhost:9003',
-    aws_access_key_id='minioadmin',
-    aws_secret_access_key='minioadmin',
-    config=Config(signature_version='s3v4')
-)
-
-buckets = ['ai-file', 'test-bucket', 'uploads', 'outputs']
-for bucket in buckets:
-    try:
-        client.create_bucket(Bucket=bucket)
-        print(f'Created bucket: {bucket}')
-    except Exception as e:
-        print(f'Bucket {bucket} already exists or error: {e}')
-"
-```
-
-### 4. 安装Python依赖
-```bash
-# 创建虚拟环境（推荐）
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# 或
-venv\Scripts\activate     # Windows
-
-# 使用国内镜像安装依赖（推荐）
-pip install -r requirements.txt -i https://mirrors.cloud.tencent.com/pypi/simple
-
-# 或使用默认源
-pip install -r requirements.txt
-
-# 验证关键依赖安装
-python -c "import fastapi, uvicorn, sqlalchemy, aiosqlite, boto3, gradio; print('All dependencies installed successfully')"
-
-# 如果需要GPU支持（可选）
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
-```
-
-### 5. 启动文档转换服务
-```bash
-# 方法1: 直接启动API服务
+# 启动API服务
 python main.py
 
-# 方法2: 使用uvicorn启动API服务（推荐开发环境）
-uvicorn main:app --host 0.0.0.0 --port 8001 --log-level info --reload
-
-# 方法3: 启动Gradio Web界面（新终端窗口）
+# 启动Web界面（可选）
 python gradio_app.py
-
-# 方法4: 后台启动API服务
-nohup uvicorn main:app --host 0.0.0.0 --port 8001 --log-level info > logs/api.log 2>&1 &
-
-# 方法5: 后台启动Gradio服务
-nohup python gradio_app.py > logs/gradio.log 2>&1 &
-
-# 方法6: 使用Docker Compose启动所有服务
-docker-compose up -d
-
-# 方法7: 生产环境启动（使用Gunicorn）
-gunicorn main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8001 --log-level info
 ```
 
-### 6. 验证服务启动
+### 2. 验证服务
 ```bash
-# 检查API服务健康状态
-curl http://localhost:8001/health
+# 健康检查
+curl http://localhost:8000/health
 
-# 预期响应
-{
-  "status": "healthy",
-  "timestamp": "2025-01-25T10:00:00Z",
-  "version": "1.0.0",
-  "services": {
-    "database": "connected",
-    "minio": "connected"
-  },
-  "system_info": {
-    "python_version": "3.9.x",
-    "platform": "Linux",
-    "memory_usage": "256MB",
-    "disk_space": "50GB available"
-  }
-}
-
-# 检查API文档访问
-curl -I http://localhost:8001/docs
-# 预期: HTTP/1.1 200 OK
-
-# 检查Gradio界面（如果启动）
-curl -I http://localhost:7860
-# 预期: HTTP/1.1 200 OK
-
-# 检查MinIO服务
-curl -I http://localhost:9003/minio/health/live
-# 预期: HTTP/1.1 200 OK
-
-# 检查MinIO控制台
-curl -I http://localhost:9004
-# 预期: HTTP/1.1 200 OK
-
-# 列出所有可用的API端点
-curl http://localhost:8001/api/endpoints
+# API文档: http://localhost:8000/docs
+# Web界面: http://localhost:7860
+# MinIO控制台: http://localhost:9001
 ```
 
 ## 📝 API端点详解
 
-### 1. 创建PDF转Markdown任务
+### 1. PDF转Markdown
 
 **端点**: `POST /api/tasks/pdf-to-markdown`
 
-**描述**: 使用MinerU 2.0 AI技术将PDF文件转换为高质量Markdown格式，支持文本提取、图片识别、表格解析和OCR功能
+**描述**: 使用MinerU 2.0将PDF转换为Markdown格式
 
-**请求参数**:
-- `file` (file, 必需): PDF文件（支持格式：.pdf，最大100MB）
-- `output_path` (string, 可选): S3输出路径，默认为 `ai-file/output/`
-- `extract_images` (boolean, 可选): 是否提取并保存图片，默认为 `true`
-- `ocr_enabled` (boolean, 可选): 是否启用OCR文字识别，默认为 `true`
-- `table_recognition` (boolean, 可选): 是否启用表格识别，默认为 `true`
-- `formula_recognition` (boolean, 可选): 是否启用公式识别，默认为 `true`
-- `priority` (string, 可选): 任务优先级（low/normal/high），默认为 `normal`
+**主要参数**:
+- `file`: PDF文件（必需）
+- `extract_images`: 提取图片（默认true）
+- `ocr_enabled`: OCR识别（默认true）
+- `priority`: 优先级（low/normal/high）
 
-**curl示例**:
+**示例**:
 ```bash
-# 基本转换
-curl -X POST "http://localhost:8001/api/tasks/pdf-to-markdown" \
-  -H "Content-Type: multipart/form-data" \
-  -F "file=@/path/to/document.pdf" \
-  -F "output_path=ai-file/output/" \
+curl -X POST "http://localhost:8000/api/tasks/pdf-to-markdown" \
+  -F "file=@document.pdf" \
   -F "extract_images=true" \
   -F "ocr_enabled=true"
-
-# 高级转换（包含所有功能）
-curl -X POST "http://localhost:8001/api/tasks/pdf-to-markdown" \
-  -H "Content-Type: multipart/form-data" \
-  -F "file=@/path/to/document.pdf" \
-  -F "output_path=ai-file/output/" \
-  -F "extract_images=true" \
-  -F "ocr_enabled=true" \
-  -F "table_recognition=true" \
-  -F "formula_recognition=true" \
-  -F "priority=high"
-
-# 快速转换（仅文本）
-curl -X POST "http://localhost:8001/api/tasks/pdf-to-markdown" \
-  -H "Content-Type: multipart/form-data" \
-  -F "file=@/path/to/document.pdf" \
-  -F "extract_images=false" \
-  -F "ocr_enabled=false" \
-  -F "priority=high"
 ```
 
-**响应示例**:
+**响应**:
 ```json
 {
   "task_id": "pdf_md_20250125_001",
   "status": "pending",
-  "task_type": "pdf_to_markdown",
-  "message": "PDF转Markdown任务已创建成功",
-  "input_file": {
-    "filename": "document.pdf",
-    "size": 2048576,
-    "s3_path": "ai-file/input/pdf_md_20250125_001/document.pdf"
-  },
-  "output_path": "ai-file/output/pdf_md_20250125_001/",
-  "parameters": {
-    "extract_images": true,
-    "ocr_enabled": true,
-    "table_recognition": true,
-    "formula_recognition": true,
-    "priority": "normal"
-  },
-  "created_at": "2025-01-25T10:00:00Z",
-  "estimated_time": "2-5分钟",
-  "progress": 0,
-  "queue_position": 1
+  "message": "任务创建成功",
+  "estimated_time": "2-5分钟"
 }
 ```
 
-### 2. 创建Office转PDF任务
+### 2. Office转PDF
 
 **端点**: `POST /api/tasks/office-to-pdf`
 
-**描述**: 使用LibreOffice将Office文档（Word、Excel、PowerPoint）转换为高质量PDF格式
+**描述**: 使用LibreOffice将Office文档转换为PDF
 
-**支持格式**: 
-- Word: .doc, .docx, .rtf, .odt
-- Excel: .xls, .xlsx, .ods, .csv
-- PowerPoint: .ppt, .pptx, .odp
+**支持格式**: Word(.docx)、Excel(.xlsx)、PowerPoint(.pptx)
 
-**请求参数**:
-- `file` (file, 必需): Office文件（最大50MB）
-- `output_path` (string, 可选): S3输出路径，默认为 `ai-file/output/`
-- `quality` (string, 可选): 输出质量（low/medium/high），默认为 `medium`
-- `page_range` (string, 可选): 页面范围（如"1-5"），默认转换全部页面
-- `orientation` (string, 可选): 页面方向（portrait/landscape），默认为 `portrait`
-- `priority` (string, 可选): 任务优先级（low/normal/high），默认为 `normal`
+**主要参数**:
+- `file`: Office文件（必需）
+- `quality`: 输出质量（low/medium/high）
+- `priority`: 优先级（low/normal/high）
 
-**curl示例**:
+**示例**:
 ```bash
-# 基本转换
-curl -X POST "http://localhost:8001/api/tasks/office-to-pdf" \
-  -H "Content-Type: multipart/form-data" \
-  -F "file=@/path/to/document.docx" \
-  -F "output_path=ai-file/output/" \
+curl -X POST "http://localhost:8000/api/tasks/office-to-pdf" \
+  -F "file=@document.docx" \
   -F "quality=high"
-
-# 高质量转换（指定页面范围）
-curl -X POST "http://localhost:8001/api/tasks/office-to-pdf" \
-  -H "Content-Type: multipart/form-data" \
-  -F "file=@/path/to/presentation.pptx" \
-  -F "output_path=ai-file/output/" \
-  -F "quality=high" \
-  -F "page_range=1-10" \
-  -F "orientation=landscape" \
-  -F "priority=high"
-
-# Excel转换
-curl -X POST "http://localhost:8001/api/tasks/office-to-pdf" \
-  -H "Content-Type: multipart/form-data" \
-  -F "file=@/path/to/spreadsheet.xlsx" \
-  -F "output_path=ai-file/output/" \
-  -F "quality=medium"
 ```
 
-**响应示例**:
+**响应**:
 ```json
 {
   "task_id": "office_pdf_20250125_002",
   "status": "pending",
-  "task_type": "office_to_pdf",
-  "message": "Office转PDF任务已创建成功",
-  "input_file": {
-    "filename": "document.docx",
-    "size": 1024000,
-    "format": "docx",
-    "s3_path": "ai-file/input/office_pdf_20250125_002/document.docx"
-  },
-  "output_path": "ai-file/output/office_pdf_20250125_002/",
-  "parameters": {
-    "quality": "high",
-    "page_range": "all",
-    "orientation": "portrait",
-    "priority": "normal"
-  },
-  "created_at": "2025-01-25T10:05:00Z",
-  "estimated_time": "1-3分钟",
-  "progress": 0,
-  "queue_position": 2
+  "message": "任务创建成功",
+  "estimated_time": "1-3分钟"
 }
 ```
 
-### 3. 创建Office转Markdown任务
+### 3. Office转Markdown
 
 **端点**: `POST /api/tasks/office-to-markdown`
 
-**描述**: 将Office文档转换为Markdown格式（两步转换：Office→PDF→Markdown），结合LibreOffice和MinerU 2.0的优势
+**描述**: 将Office文档转换为Markdown（Office→PDF→Markdown）
 
-**支持格式**: 与Office转PDF相同
-- Word: .doc, .docx, .rtf, .odt
-- Excel: .xls, .xlsx, .ods, .csv
-- PowerPoint: .ppt, .pptx, .odp
+**主要参数**:
+- `file`: Office文件（必需）
+- `extract_images`: 提取图片（默认true）
+- `table_recognition`: 表格识别（默认true）
+- `quality`: PDF质量（low/medium/high）
 
-**请求参数**:
-- `file` (file, 必需): Office文件（最大50MB）
-- `output_path` (string, 可选): S3输出路径，默认为 `ai-file/output/`
-- `extract_images` (boolean, 可选): 是否提取并保存图片，默认为 `true`
-- `ocr_enabled` (boolean, 可选): 是否启用OCR文字识别，默认为 `true`
-- `table_recognition` (boolean, 可选): 是否启用表格识别，默认为 `true`
-- `formula_recognition` (boolean, 可选): 是否启用公式识别，默认为 `true`
-- `quality` (string, 可选): 中间PDF质量（low/medium/high），默认为 `medium`
-- `priority` (string, 可选): 任务优先级（low/normal/high），默认为 `normal`
-
-**curl示例**:
+**示例**:
 ```bash
-# 基本转换
-curl -X POST "http://localhost:8001/api/tasks/office-to-markdown" \
-  -H "Content-Type: multipart/form-data" \
-  -F "file=@/path/to/document.docx" \
-  -F "output_path=ai-file/output/" \
+curl -X POST "http://localhost:8000/api/tasks/office-to-markdown" \
+  -F "file=@document.docx" \
   -F "extract_images=true" \
-  -F "ocr_enabled=true" \
-  -F "quality=high"
-
-# 完整功能转换
-curl -X POST "http://localhost:8001/api/tasks/office-to-markdown" \
-  -H "Content-Type: multipart/form-data" \
-  -F "file=@/path/to/presentation.pptx" \
-  -F "output_path=ai-file/output/" \
-  -F "extract_images=true" \
-  -F "ocr_enabled=true" \
-  -F "table_recognition=true" \
-  -F "formula_recognition=true" \
-  -F "quality=high" \
-  -F "priority=high"
-
-# Excel转Markdown（适合数据表格）
-curl -X POST "http://localhost:8001/api/tasks/office-to-markdown" \
-  -H "Content-Type: multipart/form-data" \
-  -F "file=@/path/to/data.xlsx" \
-  -F "output_path=ai-file/output/" \
-  -F "table_recognition=true" \
-  -F "quality=medium"
+  -F "table_recognition=true"
 ```
 
-**响应示例**:
+**响应**:
 ```json
 {
   "task_id": "office_md_20250125_003",
   "status": "pending",
-  "task_type": "office_to_markdown",
-  "message": "Office转Markdown任务已创建成功",
-  "input_file": {
-    "filename": "document.docx",
-    "size": 1536000,
-    "format": "docx",
-    "s3_path": "ai-file/input/office_md_20250125_003/document.docx"
-  },
-  "output_path": "ai-file/output/office_md_20250125_003/",
-  "parameters": {
-    "extract_images": true,
-    "ocr_enabled": true,
-    "table_recognition": true,
-    "formula_recognition": true,
-    "quality": "high",
-    "priority": "normal"
-  },
-  "processing_steps": [
-    "office_to_pdf",
-    "pdf_to_markdown"
-  ],
-  "created_at": "2025-01-25T10:10:00Z",
-  "estimated_time": "3-8分钟",
-  "progress": 0,
-  "queue_position": 3
+  "message": "任务创建成功",
+  "estimated_time": "3-8分钟"
 }
 ```
 
-## 6. 系统管理API
+## 📊 任务管理API
 
-### 16. 健康检查
+### 4. 查询任务状态
 
-**端点**: `GET /api/health`
+**端点**: `GET /api/tasks/{task_id}`
 
-**描述**: 检查系统健康状态，包括各个组件的运行状态
-
-**curl示例**:
+**示例**:
 ```bash
-curl "http://localhost:8001/api/health"
+curl "http://localhost:8000/api/tasks/pdf_md_20250125_001"
 ```
 
-**响应示例**:
+**响应**:
+```json
+{
+  "task_id": "pdf_md_20250125_001",
+  "status": "completed",
+  "progress": 100,
+  "output_files": [
+    "ai-file/output/document.md",
+    "ai-file/output/images/"
+  ]
+}
+```
+
+### 5. 下载文件
+
+**端点**: `GET /api/download/{bucket}/{file_path}`
+
+**示例**:
+```bash
+curl "http://localhost:8000/api/download/ai-file/output/document.md" -o document.md
+```
+
+## 🔧 系统API
+
+### 6. 健康检查
+
+**端点**: `GET /health`
+
+**示例**:
+```bash
+curl "http://localhost:8000/health"
+```
+
+**响应**:
 ```json
 {
   "status": "healthy",
-  "timestamp": "2025-01-25T16:10:00Z",
-  "version": "1.0.0",
-  "uptime": "2小时15分钟",
-  "components": {
-    "api_server": {
-      "status": "healthy",
-      "response_time": "5ms"
-    },
-    "database": {
-      "status": "healthy",
-      "connection_pool": "8/10",
-      "response_time": "12ms"
-    },
-    "minio_storage": {
-      "status": "healthy",
-      "buckets": 1,
-      "total_objects": 156,
-      "total_size": "2.3GB"
-    },
-    "task_processor": {
-      "status": "healthy",
-      "active_workers": 2,
-      "queue_size": 3,
-      "processed_today": 45
-    },
-    "mineru_engine": {
-      "status": "healthy",
-      "version": "2.0.0",
-      "gpu_available": true,
-      "memory_usage": "65%"
-    },
-    "libreoffice": {
-      "status": "healthy",
-      "version": "7.6.0",
-      "instances": 1
-    }
-  },
-  "metrics": {
-    "requests_per_minute": 12.5,
-    "average_response_time": "150ms",
-    "error_rate": "2.1%",
-    "cpu_usage": "45%",
-    "memory_usage": "68%",
-    "disk_usage": "23%"
+  "services": {
+    "database": "connected",
+    "minio": "connected"
   }
 }
 ```
 
-### 17. 系统信息
+## 📝 使用示例
 
-**端点**: `GET /api/system/info`
+### 完整转换流程
 
-**描述**: 获取系统详细信息和配置
-
-**curl示例**:
-```bash
-curl "http://localhost:8001/api/system/info"
-```
-
-**响应示例**:
-```json
-{
-  "system": {
-    "name": "DocumentConvert API",
-    "version": "1.0.0",
-    "build_time": "2025-01-25T10:00:00Z",
-    "environment": "development",
-    "python_version": "3.11.5",
-    "platform": "Linux-5.15.0-x86_64"
-  },
-  "configuration": {
-    "max_file_size": "100MB",
-    "supported_formats": {
-      "input": ["pdf", "doc", "docx", "ppt", "pptx", "xls", "xlsx"],
-      "output": ["markdown", "pdf"]
-    },
-    "max_concurrent_tasks": 5,
-    "task_timeout": "30分钟",
-    "storage_backend": "MinIO",
-    "processing_engines": {
-      "pdf_to_markdown": "MinerU 2.0",
-      "office_conversion": "LibreOffice 7.6"
-    }
-  },
-  "features": {
-    "batch_processing": true,
-    "image_extraction": true,
-    "table_recognition": true,
-    "formula_recognition": true,
-    "ocr_support": true,
-    "gpu_acceleration": true
-  }
-}
-```
-
-### 18. 系统配置
-
-**端点**: `GET /api/system/config`
-
-**描述**: 获取系统配置信息（仅管理员可访问）
-
-**请求头**:
-- `Authorization: Bearer <admin_token>` (生产环境)
-
-**curl示例**:
-```bash
-# 开发环境
-curl "http://localhost:8001/api/system/config"
-
-# 生产环境（需要认证）
-curl "http://localhost:8001/api/system/config" \
-  -H "Authorization: Bearer your_admin_token"
-```
-
-**响应示例**:
-```json
-{
-  "database": {
-    "type": "SQLite",
-    "path": "/workspace/tasks.db",
-    "connection_pool_size": 10
-  },
-  "storage": {
-    "backend": "MinIO",
-    "endpoint": "localhost:9003",
-    "bucket": "ai-file",
-    "region": "us-east-1"
-  },
-  "processing": {
-    "max_workers": 5,
-    "task_timeout": 1800,
-    "retry_attempts": 3,
-    "cleanup_interval": 3600
-  },
-  "security": {
-    "cors_enabled": true,
-    "rate_limiting": {
-      "enabled": true,
-      "requests_per_minute": 60
-    }
-  },
-  "logging": {
-    "level": "INFO",
-    "format": "structured",
-    "output": "console"
-  }
-}
-```
-
-## 📄 任务创建API
-
-### 2.1 PDF转Markdown任务
-
-将PDF文件转换为Markdown格式，同时提取图片和结构化数据。
+1. **上传文件到MinIO**
+2. **创建转换任务**
+3. **查询任务状态**
+4. **下载转换结果**
 
 ```bash
-curl -X POST "http://localhost:33081/api/tasks/create" \
-  -F "task_type=pdf_to_markdown" \
-  -F "bucket_name=gaojiaqi" \
-  -F "file_path=Gemini for Google Workspace 提示指南 101（Gemini 工作区提示指南 101）.pdf" \
-  -F "priority=high"
+# 1. 创建PDF转Markdown任务
+curl -X POST "http://localhost:8000/api/tasks/pdf-to-markdown" \
+  -F "file=@document.pdf" \
+  -F "extract_images=true"
+
+# 2. 查询任务状态
+curl "http://localhost:8000/api/tasks/pdf_md_20250125_001"
+
+# 3. 下载结果文件
+curl "http://localhost:8000/api/download/ai-file/output/document.md" -o result.md
 ```
 
-**参数说明**:
-- `task_type`: 固定值 `pdf_to_markdown`
-- `bucket_name`: S3存储桶名称 (例如: `documents`, `ai-file`, `reports`)
-- `file_path`: 文件在S3中的路径 (例如: `reports/annual_report.pdf`)
-- `platform`: 平台标识，用于任务分类 (例如: `web-app`, `api-client`)
-- `priority`: 任务优先级 (`high`, `normal`, `low`)
+## 📋 错误码说明
 
-**响应示例**:
-```json
-{
-  "task_id": 26,
-  "message": "Document conversion task 26 created successfully",
-  "status": "pending"
-}
-```
+| 状态码 | 说明 |
+|--------|------|
+| 200 | 成功 |
+| 400 | 请求参数错误 |
+| 404 | 任务不存在 |
+| 500 | 服务器内部错误 |
 
-**输出文件**:
-- `annual_report.md`: 主要的Markdown文件
-- `annual_report.json`: 文档结构化数据
-- `images/`: 提取的图片文件夹
+## 🔗 相关链接
 
-### 2.2 Office转PDF任务
+- API文档: http://localhost:8000/docs
+- Web界面: http://localhost:7860
+- MinIO控制台: http://localhost:9001
 
-将Office文档(Word/Excel/PowerPoint)转换为PDF格式。
+---
 
-```bash
-curl -X POST "http://localhost:8000/api/tasks/create" \
-  -F "task_type=office_to_pdf" \
-  -F "bucket_name=documents" \
-  -F "file_path=presentations/quarterly_review.pptx" \
-  -F "platform=your-platform" \
-  -F "priority=normal"
-```
-
-**支持的文件格式**:
-- Word: `.doc`, `.docx`
-- Excel: `.xls`, `.xlsx`
-- PowerPoint: `.ppt`, `.pptx`
-
-**响应示例**:
-```json
-{
-  "task_id": 27,
-  "message": "Document conversion task 27 created successfully",
-  "status": "pending"
-}
-```
-
-### 2.3 Office转Markdown任务 (两步转换)
-
-将Office文档先转换为PDF，再转换为Markdown，适用于复杂格式的文档。
-
-```bash
-curl -X POST "http://localhost:8000/api/tasks/create" \
-  -F "task_type=office_to_markdown" \
-  -F "bucket_name=documents" \
-  -F "file_path=reports/financial_report.xlsx" \
-  -F "platform=your-platform" \
-  -F "priority=high"
-```
-
-**处理流程**:
-1. Office文档 → PDF (使用LibreOffice)
-2. PDF → Markdown (使用MinerU)
-
-**输出文件**:
-- `financial_report.md`: Markdown文件
-- `financial_report.json`: 结构化数据
-- `images/`: 图片和图表
-
-## 4. 批量操作API
-
-### 9. 批量创建任务
-
-**端点**: `POST /api/tasks/batch`
-
-**描述**: 批量创建多个转换任务，支持不同类型的转换任务混合提交
-
-**请求体参数**:
-- `tasks` (array): 任务列表，每个任务包含以下字段：
-  - `task_type` (string): 任务类型（pdf_to_markdown/office_to_pdf/office_to_markdown）
-  - `input_file_path` (string): 输入文件S3路径
-  - `output_path` (string): 输出路径
-  - `parameters` (object, 可选): 转换参数
-  - `priority` (string, 可选): 优先级
-- `batch_name` (string, 可选): 批次名称
-- `callback_url` (string, 可选): 批次完成回调URL
-
-**curl示例**:
-```bash
-curl -X POST "http://localhost:8001/api/tasks/batch" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "batch_name": "文档批量转换_20250125",
-    "callback_url": "https://your-app.com/batch-callback",
-    "tasks": [
-      {
-        "task_type": "pdf_to_markdown",
-        "input_file_path": "ai-file/input/document1.pdf",
-        "output_path": "ai-file/output/batch1/",
-        "parameters": {
-          "extract_images": true,
-          "table_recognition": true
-        },
-        "priority": "high"
-      },
-      {
-        "task_type": "office_to_pdf",
-        "input_file_path": "ai-file/input/presentation.pptx",
-        "output_path": "ai-file/output/batch1/",
-        "parameters": {
-          "orientation": "landscape"
-        },
-        "priority": "normal"
-      }
-    ]
-  }'
-```
-
-**响应示例**:
-```json
-{
+*更多详细信息请参考在线API文档*
   "message": "批量任务创建成功",
   "batch_id": "batch_20250125_001",
   "batch_name": "文档批量转换_20250125",
